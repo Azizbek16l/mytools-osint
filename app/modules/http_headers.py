@@ -46,8 +46,9 @@ async def run(query: Query) -> AsyncIterator[Hit]:
         client = await get_client()
         r = await client.get(url, follow_redirects=True, timeout=15)
     except Exception as e:
+        from app.core.classify import classify_exception
         yield Hit(module=NAME, source="GET", category="http",
-                  status=HitStatus.ERROR, detail=str(e))
+                  status=classify_exception(e), detail=f"{type(e).__name__}: {e}"[:100])
         return
 
     headers = {k.lower(): v for k, v in r.headers.items()}

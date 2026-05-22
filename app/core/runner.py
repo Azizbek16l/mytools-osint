@@ -94,7 +94,19 @@ class Runner:
         if not modules:
             return result
 
-        await asyncio.gather(*(collect(m) for m in modules))
+        try:
+            async with asyncio.TaskGroup() as tg:
+                for m in modules:
+                    tg.create_task(collect(m), name=f"osint:{m.name}")
+        except* asyncio.CancelledError:
+            # Cooperative cancel — siblings already torn down by TaskGroup.
+            pass
+        except* Exception:
+            # Module exceptions are already converted to ERROR Hits inside collect().
+            # Anything still surfacing here is unexpected — swallow to keep partial
+            # results usable rather than crash the whole query.
+            pass
+
         result.finished_at = datetime.now(UTC)
         result.duration_ms = int((time.perf_counter() - started) * 1000)
         return result

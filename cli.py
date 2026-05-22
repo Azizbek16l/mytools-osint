@@ -96,13 +96,16 @@ class Style:
 
 
 def _color_for(status: HitStatus, st: Style) -> str:
-    """Two-char status badge — Nerd Font glyph or ASCII fallback."""
+    """Two-char status badge. ERROR is reserved for true tool bugs; service-side
+    outages render dim, never red."""
     return {
         HitStatus.FOUND:       st.ok(f"{tokens.ICON_OK} "),
         HitStatus.NOT_FOUND:   st.dim(f"{tokens.ICON_SKIP} "),
         HitStatus.UNCERTAIN:   st.warn(f"{tokens.ICON_QUESTION} "),
-        HitStatus.ERROR:       st.bad(f"{tokens.ICON_BAD} "),
+        HitStatus.ERROR:       st.bad(f"{tokens.ICON_BAD} "),         # OUR bug
         HitStatus.RATELIMITED: st.warn(f"{tokens.ICON_WARN} "),
+        HitStatus.UNAVAILABLE: st.dim("~ "),                          # upstream down
+        HitStatus.NO_DATA:     st.dim(f"{tokens.ICON_SKIP} "),        # empty result
         HitStatus.SKIPPED:     st.dim(f"{tokens.ICON_SKIP} "),
     }.get(status, "? ")
 
@@ -147,6 +150,7 @@ def _result_box(result, elapsed_ms: int, st: Style, sink) -> None:
     errs = len(result.errors)
     rates = sum(1 for h in result.hits if h.status == HitStatus.RATELIMITED)
     skipped = sum(1 for h in result.hits if h.status == HitStatus.SKIPPED)
+    unavail = [h for h in result.hits if h.status == HitStatus.UNAVAILABLE]
     rows = [
         f"  found       {st.ok(str(positives))} of {total}",
         f"  errors      {st.bad(str(errs))}",
@@ -154,6 +158,10 @@ def _result_box(result, elapsed_ms: int, st: Style, sink) -> None:
         f"  skipped     {st.dim(str(skipped))}",
         f"  elapsed     {elapsed_ms} ms",
     ]
+    if unavail:
+        names = sorted({h.title or h.source for h in unavail})
+        rows.append(f"  upstream    {st.dim(str(len(unavail)))} down ({', '.join(names[:3])}"
+                    + (", …" if len(names) > 3 else "") + ")")
     _box(f"result — by {BRAND}", rows, st, sink, color="dim")
 
 
@@ -208,8 +216,14 @@ async def _stream_run(q: Query, args: argparse.Namespace, st: Style, sink) -> in
     hits: list[Hit] = []
 
     def visible(h: Hit) -> bool:
+        if args.debug:
+            return True                                       # show everything
         if args.all:
-            return True
+            return h.status not in (HitStatus.NO_DATA,)       # all but truly-empty
+        if (h.category or "") == "summary":
+            return False                                      # quiet by default
+        if h.status in (HitStatus.UNAVAILABLE, HitStatus.NO_DATA, HitStatus.SKIPPED):
+            return False                                      # silent non-actionables
         return h.status in (HitStatus.FOUND, HitStatus.RATELIMITED) or (
             h.status == HitStatus.NOT_FOUND and (h.category or "").startswith("breach")
         )
@@ -298,6 +312,10 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="print banner + version and exit")
     ap.add_argument("--interactive", "-i", action="store_true",
                     help="launch the interactive menu shell (default when no value + TTY)")
+    ap.add_argument("--debug", action="store_true",
+                    help="show per-source diagnostics, summaries, and upstream outages")
+    ap.add_argument("--per-source", action="store_true",
+                    help="emit one Hit per (subdomain, source) instead of deduplicated rows")
     return ap
 
 

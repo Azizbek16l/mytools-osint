@@ -354,31 +354,56 @@ async def run(query: Query) -> AsyncIterator[Hit]:
                 all_subs[s].add(f"IP:{ip_map[s]}")
         summaries.append((name, summary, len(subs)))
 
-    # Emit ONE Hit per discovered subdomain — host visible in source column
+    # Emit ONE Hit per discovered subdomain — host visible in source column.
+    # Confidence is encoded in Severity: ≥3 sources = HIGH, 2 = MEDIUM, 1 = LOW.
     for sub in sorted(all_subs):
         sources = all_subs[sub]
         ip_marks = [m for m in sources if m.startswith("IP:")]
         passive = [m for m in sources if not m.startswith("IP:")]
-        detail = f"seen by {len(passive)} source(s): {', '.join(sorted(passive))}"
+        n = len(passive)
+        if n >= 3:
+            sev = Severity.HIGH
+        elif n >= 2:
+            sev = Severity.MEDIUM
+        else:
+            sev = Severity.LOW
+        dots = "●" * min(n, 3) + "○" * max(0, 3 - n)
+        detail = f"{dots}  seen by {n} source(s): {', '.join(sorted(passive))}"
         if ip_marks:
             detail += "  ·  " + ", ".join(ip_marks)
         yield Hit(
             module=NAME, source=sub, category="subdomain",
             status=HitStatus.FOUND, title=sub,
-            detail=detail,
-            url=f"https://{sub}",
-            severity=Severity.MEDIUM,
-            extra={"sources": list(sources)},
+            detail=detail, url=f"https://{sub}",
+            severity=sev, extra={"sources": list(sources), "confidence": n},
         )
 
-    # Per-source summary row (so the user knows which source rate-limited / errored)
+    # Per-source summary. Tagged category="summary" so cli.py can hide them by
+    # default and only show under --debug. Outage classification:
+    #   count > 0     → FOUND (meaningful)
+    #   HTTP 5xx/timeout → UNAVAILABLE (service down, NOT our bug)
+    #   "0 hosts"     → NO_DATA (service reachable, just empty)
     for name, summary, count in summaries:
-        sev = Severity.MEDIUM if count > 0 else Severity.INFO
+        if count > 0:
+            yield Hit(
+                module=NAME, source=f"{name} (summary)", category="summary",
+                status=HitStatus.FOUND, title=name, detail=summary,
+                severity=Severity.INFO,
+            )
+            continue
+        s_lower = summary.lower()
+        if any(m in s_lower for m in (
+            "http 5", "timeout", "remoteproto", "connection",
+            "remotedisconnect", "networkerror", "readtimeout", "connecterror",
+        )):
+            status = HitStatus.UNAVAILABLE
+            detail = f"service unavailable — {summary}"
+        else:
+            status = HitStatus.NO_DATA
+            detail = summary or "no data"
         yield Hit(
-            module=NAME, source=f"{name} (summary)", category="subdomain",
-            status=HitStatus.FOUND if count > 0 else HitStatus.NOT_FOUND,
-            title=name, detail=summary,
-            severity=sev,
+            module=NAME, source=f"{name} (summary)", category="summary",
+            status=status, title=name, detail=detail, severity=Severity.INFO,
         )
 
     # urlscan.io entries — separate (these are scans, not subdomains)

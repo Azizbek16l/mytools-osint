@@ -117,10 +117,16 @@ async def _grab_cert(host: str, port: int, timeout: float = 20.0) -> dict | None
 async def _probe(host: str, port: int) -> AsyncIterator[Hit]:
     data = await _grab_cert(host, port)
     if data is None or "error" in data:
+        err_text = data.get("error", "connect failed") if data else "no response"
+        # Connection-level errors are upstream issues, not our bug → UNAVAILABLE
+        is_upstream = any(m in err_text for m in (
+            "TimeoutError", "ConnectionRefused", "ConnectionReset",
+            "OSError", "EOFError", "[WinError",
+        ))
         yield Hit(
             module=NAME, source=f"{host}:{port}", category="tls",
-            status=HitStatus.ERROR,
-            detail=data.get("error", "connect failed") if data else "no response",
+            status=HitStatus.UNAVAILABLE if is_upstream else HitStatus.ERROR,
+            detail=err_text,
         )
         return
 

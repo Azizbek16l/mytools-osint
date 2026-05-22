@@ -104,6 +104,8 @@ def _status_marker(status: HitStatus) -> Text:
         HitStatus.UNCERTAIN:   (tokens.ICON_QUESTION, tokens.WARN),
         HitStatus.ERROR:       (tokens.ICON_BAD,      tokens.BAD),
         HitStatus.RATELIMITED: (tokens.ICON_WARN,     tokens.WARN),
+        HitStatus.UNAVAILABLE: ("~",                  tokens.DIM),
+        HitStatus.NO_DATA:     (tokens.ICON_SKIP,     tokens.DIM),
         HitStatus.SKIPPED:     (tokens.ICON_SKIP,     tokens.DIM),
     }
     sym, style = table.get(status, ("?", ""))
@@ -143,8 +145,16 @@ def _render_body(query: Query, hits: list[Hit]) -> Table:
     t.add_column("source", width=24)
     t.add_column("evidence", overflow="fold")
     t.add_column("url", overflow="ellipsis", max_width=42, style=f"{tokens.ACCENT}")
-    visible = [h for h in hits if h.status in (HitStatus.FOUND, HitStatus.RATELIMITED)
-               or (h.category or "").startswith("breach")]
+    def _is_actionable(h: Hit) -> bool:
+        if (h.category or "") == "summary":
+            return False
+        if h.status in (HitStatus.UNAVAILABLE, HitStatus.NO_DATA, HitStatus.SKIPPED):
+            return False
+        return h.status in (HitStatus.FOUND, HitStatus.RATELIMITED) or (
+            h.status == HitStatus.NOT_FOUND and (h.category or "").startswith("breach")
+        )
+
+    visible = [h for h in hits if _is_actionable(h)]
     for h in visible[-40:]:
         t.add_row(_status_marker(h.status), h.module, h.source,
                   h.detail[:120], h.url or "")

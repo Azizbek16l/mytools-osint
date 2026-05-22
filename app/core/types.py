@@ -21,9 +21,11 @@ class QueryKind(StrEnum):
 class HitStatus(StrEnum):
     FOUND = "found"           # account/profile exists
     NOT_FOUND = "not_found"   # confirmed absent
-    UNCERTAIN = "uncertain"   # ambiguous response (often soft block / rate-limited)
-    ERROR = "error"           # network/HTTP error
+    UNCERTAIN = "uncertain"   # ambiguous response (often soft block / detection-evading)
+    ERROR = "error"           # OUR bug: parse fail, code crash, bad URL
     RATELIMITED = "ratelimited"
+    UNAVAILABLE = "unavailable"  # upstream 5xx/521/timeout — service-side, NOT our fault
+    NO_DATA = "no_data"       # source healthy, returned empty set (correct but boring)
     SKIPPED = "skipped"       # disabled, missing creds, etc.
 
 
