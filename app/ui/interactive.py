@@ -369,12 +369,17 @@ def _render_streaming_layout(
 
 
 async def run_query(db: Database, query: Query) -> tuple[list[Hit], int]:
-    """Run a single query with a live split-pane (modules rail | hits feed)."""
+    """Run a single query with a live split-pane (modules rail | hits feed).
+
+    Runs in the terminal's **alternate screen buffer** (`screen=True`) — exactly
+    like htop / k9s / lazygit. This eliminates the per-frame flicker we get on
+    Windows Terminal when Rich redraws panel borders 12 times per second.
+    Refresh is throttled to 6 Hz; on exit we transition back to the main screen
+    and print a static snapshot so the result remains visible in scrollback.
+    """
     r = runner()
     hits: list[Hit] = []
     progress: dict[str, ModProgress] = {}
-    # Pre-populate with all modules that will fan out for this kind, so the rail
-    # shows everything as "idle" before the first hit arrives.
     for m in r.modules_for(query.kind):
         progress[m.name] = ModProgress(name=m.name, state="idle")
     started = asyncio.get_event_loop().time()
@@ -383,38 +388,58 @@ async def run_query(db: Database, query: Query) -> tuple[list[Hit], int]:
         hits.append(h)
         _update_module_progress(progress, h, asyncio.get_event_loop().time())
 
-    with Live(
-        _render_streaming_layout(query, hits, progress, 0, False),
-        console=console, refresh_per_second=12, screen=False, transient=False,
-    ) as live:
-        task = asyncio.create_task(r.run(query, on_hit=on_hit))
-        try:
-            while not task.done():
-                elapsed_ms = int((asyncio.get_event_loop().time() - started) * 1000)
-                live.update(_render_streaming_layout(
-                    query, hits, progress, elapsed_ms, False,
-                ))
-                try:
-                    await asyncio.wait_for(asyncio.shield(task), timeout=0.1)
-                except TimeoutError:
-                    continue
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            task.cancel()
-            try:
-                await task
-            except Exception:
-                pass
-        result = await task
-        elapsed_ms = int((asyncio.get_event_loop().time() - started) * 1000)
-        for p in progress.values():
-            p.state = "done"
-        live.update(_render_streaming_layout(
-            query, hits, progress, elapsed_ms, True,
-        ))
+    result = None
     try:
-        await db.save_result(result)
-    except Exception:
+        with Live(
+            _render_streaming_layout(query, hits, progress, 0, False),
+            console=console,
+            refresh_per_second=6,
+            screen=True,          # alternate buffer — no flicker
+            transient=False,
+            vertical_overflow="visible",
+            auto_refresh=True,
+        ) as live:
+            task = asyncio.create_task(r.run(query, on_hit=on_hit))
+            try:
+                while not task.done():
+                    elapsed_ms = int(
+                        (asyncio.get_event_loop().time() - started) * 1000,
+                    )
+                    live.update(_render_streaming_layout(
+                        query, hits, progress, elapsed_ms, False,
+                    ))
+                    try:
+                        await asyncio.wait_for(asyncio.shield(task), timeout=0.15)
+                    except TimeoutError:
+                        continue
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                task.cancel()
+                try:
+                    await task
+                except Exception:
+                    pass
+            result = await task
+            elapsed_ms = int((asyncio.get_event_loop().time() - started) * 1000)
+            for p in progress.values():
+                p.state = "done"
+            live.update(_render_streaming_layout(
+                query, hits, progress, elapsed_ms, True,
+            ))
+            # one final paint inside the alt buffer so the user sees done state
+            await asyncio.sleep(0.4)
+    except KeyboardInterrupt:
         pass
+
+    elapsed_ms = int((asyncio.get_event_loop().time() - started) * 1000)
+    # After the alt-screen Live closes, the main screen is restored — print a
+    # static snapshot of the dashboard so the result lives on in scrollback.
+    console.print(_render_streaming_layout(query, hits, progress, elapsed_ms, True))
+
+    if result is not None:
+        try:
+            await db.save_result(result)
+        except Exception:
+            pass
     return hits, elapsed_ms
 
 
