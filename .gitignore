@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Secrets
+.env
+.env.local
+.env.*.local
+*.session
+*.session-journal
+
+# Local state (per-user, never commit)
+data/cache/
+data/state/
+data/exports/
+data/telethon/
+
+# Nuitka build
+*.build/
+*.dist/
+*.onefile-build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store

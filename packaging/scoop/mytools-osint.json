@@ -1,0 +1,25 @@
+{
+  "version": "0.1.0",
+  "description": "Bluetm OSINT toolkit — CLI + GUI",
+  "homepage": "https://github.com/Azizbek16l/mytools-osint",
+  "license": "Proprietary",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/Azizbek16l/mytools-osint/releases/download/v0.1.0/mytools-osint-windows-x64.exe#/mytools-osint.exe",
+      "hash": "REPLACE_WITH_ACTUAL_SHA256_AFTER_RELEASE"
+    }
+  },
+  "bin": [
+    ["mytools-osint.exe", "mytools-osint"],
+    ["mytools-osint.exe", "osint"]
+  ],
+  "persist": ".mytools-osint",
+  "checkver": { "github": "https://github.com/Azizbek16l/mytools-osint" },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/Azizbek16l/mytools-osint/releases/download/v$version/mytools-osint-windows-x64.exe"
+      }
+    }
+  }
+}

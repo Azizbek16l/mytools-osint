@@ -1,0 +1,122 @@
+[project]
+name = "mytools-osint"
+version = "0.1.0"
+description = "Personal OSINT toolkit — CLI + GUI · username/email/phone/Telegram/domain/IP · free APIs, no paid keys"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Mars IT / Bluetm.uz" }]
+keywords = ["osint", "security", "telegram", "footprint", "investigation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Internet",
+]
+
+dependencies = [
+    "httpx[http2]>=0.27.0",
+    "anyio>=4.4.0",
+    "pydantic>=2.7.0",
+    "python-dotenv>=1.0.1",
+    "phonenumbers>=8.13.40",
+    "email-validator>=2.2.0",
+    "telethon>=1.36.0",
+    "cryptg>=0.4.0",
+    "cryptography>=42.0.0",
+    "rich>=13.7.1",
+    "questionary>=2.0.0",
+    "prompt_toolkit>=3.0.50",
+    "platformdirs>=4.2.2",
+    "tldextract>=5.1.2",
+    "aiosqlite>=0.20.0",
+    "ua-generator>=2.0.0",
+    "dnspython>=2.6.1",
+]
+
+[project.optional-dependencies]
+gui = [
+    "PySide6>=6.7.0",
+    "qasync>=0.27.1",
+]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.7",
+    "pytest-qt>=4.4.0",
+    "ruff>=0.5.0",
+    "mypy>=1.10.0",
+    "build>=1.2.0",
+    "twine>=5.0.0",
+]
+build = [
+    "nuitka>=2.4",
+    "ordered-set>=4.1.0",
+    "zstandard>=0.22.0",
+]
+
+[project.scripts]
+osint = "cli:main"
+
+[project.gui-scripts]
+mytools-osint = "main:main"
+
+[project.urls]
+Homepage = "https://github.com/Azizbek16l/mytools-osint"
+Issues = "https://github.com/Azizbek16l/mytools-osint/issues"
+Releases = "https://github.com/Azizbek16l/mytools-osint/releases"
+
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+include = ["cli.py", "main.py", "data/**/*.json"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "app/",
+    "cli.py",
+    "main.py",
+    "data/",
+    "scripts/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".env.example",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "S", "C4", "PIE", "RET", "SIM", "PL"]
+ignore = [
+  "S101", "S110", "S303", "S324", "S310", "S311", "S603",
+  "ASYNC109", "ASYNC250",
+  "PLW0603", "PLW2901", "PLC0415", "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR1714", "PLR2004",
+  "E402", "E501", "E702", "E741",
+  "SIM102", "SIM103", "SIM108", "SIM105", "SIM115",
+  "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "PL"]
+"scripts/**" = ["S", "PL"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

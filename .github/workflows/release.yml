@@ -1,0 +1,189 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, target: windows-x64,  ext: .exe }
+          - { os: macos-13,       target: macos-x86_64, ext: ''   }
+          - { os: macos-14,       target: macos-arm64,  ext: ''   }
+          - { os: ubuntu-22.04,   target: linux-x86_64, ext: ''   }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install nuitka ordered-set zstandard
+
+      - name: Build CLI (Nuitka onefile)
+        run: python scripts/build_cli.py
+
+      - name: Build GUI (Nuitka onefile)
+        run: python scripts/build_exe.py
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p out
+          cp dist/osint${{ matrix.ext }}        out/osint-${{ matrix.target }}${{ matrix.ext }}
+          cp dist/mytools-osint${{ matrix.ext }} out/mytools-osint-${{ matrix.target }}${{ matrix.ext }}
+          cd out && shasum -a 256 * > SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.target }}
+          path: out/*
+
+  linux-packages:
+    name: Linux .deb + .rpm + AppImage
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-linux-x86_64
+          path: bin
+      - name: Install fpm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm
+          sudo gem install --no-document fpm
+      - name: Build .deb + .rpm
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p pkg/usr/local/bin
+          install -m 0755 bin/osint-linux-x86_64        pkg/usr/local/bin/osint
+          install -m 0755 bin/mytools-osint-linux-x86_64 pkg/usr/local/bin/mytools-osint
+          # bash completion (optional)
+          mkdir -p pkg/etc/bash_completion.d
+          cat > pkg/etc/bash_completion.d/osint <<'EOF'
+          _osint() {
+            COMPREPLY=( $(compgen -W "--version --help --kind --all --format --out --no-color --no-banner --list-modules --list-stats --interactive config" -- "${COMP_WORDS[COMP_CWORD]}") )
+          }
+          complete -F _osint osint
+          EOF
+          VERSION="${GITHUB_REF_NAME#v}"
+          [ -z "$VERSION" ] && VERSION="0.0.0"
+          fpm -s dir -t deb -C pkg \
+              --name mytools-osint --version "$VERSION" \
+              --license MIT --architecture amd64 \
+              --maintainer "Bluetm.uz <azizbektopilboyev7@gmail.com>" \
+              --description "Personal OSINT toolkit — CLI + GUI, free APIs only" \
+              --url "https://github.com/Azizbek16l/mytools-osint" \
+              --depends "libc6 (>= 2.31)" \
+              --deb-suggests python3 \
+              --output-type deb \
+              --package "mytools-osint_${VERSION}_amd64.deb"
+          fpm -s dir -t rpm -C pkg \
+              --name mytools-osint --version "$VERSION" \
+              --license MIT --architecture x86_64 \
+              --maintainer "Bluetm.uz <azizbektopilboyev7@gmail.com>" \
+              --description "Personal OSINT toolkit — CLI + GUI, free APIs only" \
+              --url "https://github.com/Azizbek16l/mytools-osint" \
+              --output-type rpm \
+              --package "mytools-osint-${VERSION}-1.x86_64.rpm"
+          # AppImage — minimum-viable wrapper
+          mkdir -p AppDir/usr/bin
+          cp bin/osint-linux-x86_64        AppDir/usr/bin/osint
+          cp bin/mytools-osint-linux-x86_64 AppDir/usr/bin/mytools-osint
+          chmod +x AppDir/usr/bin/*
+          cat > AppDir/mytools-osint.desktop <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=mytools-osint
+          Exec=osint
+          Icon=mytools-osint
+          Categories=Utility;Security;
+          EOF
+          touch AppDir/mytools-osint.png   # placeholder icon
+          cat > AppDir/AppRun <<'EOF'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/osint" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir "mytools-osint-${VERSION}-x86_64.AppImage" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            *.deb
+            *.rpm
+            *.AppImage
+
+  publish:
+    name: GitHub Release
+    needs: [build, linux-packages]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          draft: false
+
+  pypi:
+    name: PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          pip install build
+          python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  docker:
+    name: Docker (ghcr.io)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/osint:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/osint:latest

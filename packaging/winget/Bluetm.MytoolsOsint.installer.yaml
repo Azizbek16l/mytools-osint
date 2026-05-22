@@ -1,0 +1,15 @@
+# Winget installer manifest. Submit to microsoft/winget-pkgs in
+# manifests/b/Bluetm/MytoolsOsint/0.1.0/  along with the .locale.en-US.yaml
+# and the root .yaml. Use `wingetcreate update` in CI to auto-bump versions.
+PackageIdentifier: Bluetm.MytoolsOsint
+PackageVersion: 0.1.0
+InstallerType: portable
+Commands:
+  - osint
+  - mytools-osint
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/Azizbek16l/mytools-osint/releases/download/v0.1.0/mytools-osint-windows-x64.exe
+    InstallerSha256: REPLACE_WITH_ACTUAL_SHA256_AFTER_RELEASE
+ManifestType: installer
+ManifestVersion: 1.6.0
