@@ -904,23 +904,52 @@ async def action_settings_overview() -> None:
 # ---- main loop --------------------------------------------------------------
 
 async def run_interactive() -> int:
-    """Top-level interactive shell. Returns process exit code."""
+    """Top-level interactive shell. Returns process exit code.
+
+    Hero matches the design mockup (screens-a.jsx · SCREEN 1):
+        BANNER
+        ● online · N sites · M modules · free APIs · authorised use only
+        ┌── main menu ───────────────────────────────────────────────────
+          [L]  new lookup       single prompt with auto-detect
+          [H]  recent history   …
+          …
+        └────────────────────────────────────────────────────────────────
+        ↑↓ navigate  ↵ select  / jump  ? help  q quit  ·  ● ready
+    """
     # Big banner once, on cold start
     console.print(render_banner())
 
-    # Hero subtitle with stats
+    # Hero status subtitle (matches mockup line 38-48)
+    from app import __version__ as _ver
     try:
         from app.modules.username import load_sites
         n_sites = len(load_sites())
     except Exception:
         n_sites = 0
-    hero = Text("   ")
-    hero.append("personal OSINT", style=f"bold {tokens.FG}")
-    hero.append("  ·  ", style=tokens.DIM)
-    hero.append(f"{n_sites:,} probe targets", style=tokens.ACCENT)
-    hero.append("  ·  free APIs only  ·  ", style=tokens.DIM)
-    hero.append("authorised use", style=tokens.WARN)
-    console.print(hero)
+    r = runner()
+    n_modules = len(r.all_modules())
+
+    title_line = Text("   ")
+    title_line.append("mytools-osint ", style=tokens.FG)
+    title_line.append(f"v{_ver} ", style=tokens.DIM)
+    title_line.append("— by ", style=tokens.FG)
+    title_line.append("Bluetm.uz", style=f"bold {tokens.ACCENT}")
+    console.print(title_line)
+
+    status_line = Text("   ")
+    status_line.append("●", style=tokens.OK)
+    status_line.append(" online ", style=tokens.DIM)
+    status_line.append("·", style=tokens.DIM)
+    status_line.append(f" {n_sites:,} ", style=tokens.FG)
+    status_line.append("sites", style=tokens.DIM)
+    status_line.append(" · ", style=tokens.DIM)
+    status_line.append(f"{n_modules} ", style=tokens.FG)
+    status_line.append("modules", style=tokens.DIM)
+    status_line.append(" · ", style=tokens.DIM)
+    status_line.append("free APIs", style=tokens.FG)
+    status_line.append(" · ", style=tokens.DIM)
+    status_line.append("authorised use only", style=tokens.DIM)
+    console.print(status_line)
     console.print()
 
     s = settings()
@@ -928,27 +957,45 @@ async def run_interactive() -> int:
     await db.connect()
     try:
         while True:
-            _print_compact()  # one-line brandmark before each prompt
+            # Render the design's main-menu divider chrome
+            console.print(Text("   ").append("┌── ", style=tokens.DIM)
+                          .append("main menu", style=f"bold {tokens.FG}")
+                          .append(" ─" * 32 + "──", style=tokens.DIM))
+            console.print()
             choice = await questionary.select(
-                "main menu",
+                "",
                 choices=[
-                    Choice("  new lookup     ·  single prompt with auto-detect", value="lookup",
-                           shortcut_key="l"),
-                    Choice("  recent history ·  per-day heatmap",               value="history",
-                           shortcut_key="h"),
-                    Choice("  modules        ·  k9s-style table",                value="modules",
-                           shortcut_key="m"),
-                    Choice("  sites          ·  category breakdown",             value="stats",
-                           shortcut_key="s"),
-                    Choice("  settings       ·  API keys, Telegram, paths",      value="settings",
-                           shortcut_key="t"),
-                    Choice("  exit",                                              value="exit",
-                           shortcut_key="q"),
+                    Choice("  [L]  new lookup           single prompt with auto-detect",
+                           value="lookup",   shortcut_key="l"),
+                    Choice("  [H]  recent history       last 50 queries · resume any",
+                           value="history",  shortcut_key="h"),
+                    Choice("  [M]  modules              k9s-style table · health · 7d",
+                           value="modules",  shortcut_key="m"),
+                    Choice("  [S]  sites                Sherlock + WhatsMyName breakdown",
+                           value="stats",    shortcut_key="s"),
+                    Choice("  [T]  settings             API keys · Telegram · paths",
+                           value="settings", shortcut_key="t"),
+                    Choice("  [Q]  exit",
+                           value="exit",     shortcut_key="q"),
                 ],
                 style=QSTYLE,
                 use_shortcuts=True,
-                instruction="(↑↓ or single key)",
+                qmark="",
+                instruction="",
             ).ask_async()
+            # Render the closing divider + footer (only when not exiting)
+            console.print(Text("   ").append("└" + ("─" * 75), style=tokens.DIM))
+            console.print()
+            footer = Text("   ")
+            for k, lbl in (("↑↓", " navigate  "), ("↵", " select  "),
+                           ("/", " jump  "), ("?", " help  "), ("q", " quit")):
+                footer.append(k, style=f"bold {tokens.ACCENT}")
+                footer.append(lbl, style=tokens.DIM)
+            footer.append("  ·  ", style=tokens.DIM)
+            footer.append("●", style=tokens.OK)
+            footer.append(" ready", style=tokens.DIM)
+            console.print(footer)
+            console.print()
             if choice in (None, "exit"):
                 console.print(f"\n[{tokens.DIM}]bye — {BRAND}[/]\n")
                 return 0

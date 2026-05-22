@@ -185,28 +185,94 @@ def _print_no_arg_panel(st: Style, sink) -> None:
 
 
 def _print_modules(st: Style, sink) -> None:
+    """k9s-style modules table — NAME · KINDS · HEALTH · STATE · GLYPH · 7d."""
     r = runner()
-    rows = []
-    for m in r.all_modules():
-        kinds = ", ".join(k.value for k in sorted(m.kinds, key=lambda k: k.value))
-        mark = st.green("●") if m.enabled else st.dim("○")
-        rows.append(f"  {mark} {st.bold(m.name):<22}  {st.dim('kinds:')} {kinds}")
-    _box(f"MODULES — by {BRAND}", rows, st, sink, color="magenta")
+    mods = r.all_modules()
+    n_active = sum(1 for m in mods if m.enabled)
+    try:
+        from app.modules.username import load_sites
+        n_sites = len(load_sites())
+    except Exception:
+        n_sites = 0
+
+    print(file=sink)
+    hdr = (f"   {st.accent(st.bold('bluetm·uz'))}"
+           f"{st.dim('   modules  ·  ')}{st.ok(st.bold(str(n_active)))}"
+           f"{st.dim(' active  ·  ')}{st.bold(f'{n_sites:,}')}"
+           f"{st.dim(' probe targets')}")
+    print(hdr, file=sink)
+    print(file=sink)
+
+    # column header
+    cols = [
+        (st.accent(st.bold(f"{'NAME':<14}")), "NAME"),
+        (st.accent(st.bold(f"{'KINDS':<38}")), "KINDS"),
+        (st.accent(st.bold(f"{'HEALTH':<10}")), "HEALTH"),
+        (st.accent(st.bold(f"{'STATE':<6}")), "STATE"),
+        (st.accent(st.bold(f"{'GLYPH':<5}")), "GLYPH"),
+        (st.accent(st.bold(f"{'7d':<7}")), "7d"),
+    ]
+    print("   " + "  ".join(c[0] for c in cols), file=sink)
+    print("   " + "  ".join(st.dim("─" * max(2, len(c[1]) + 6)) for c in cols), file=sink)
+
+    bars = "▁▂▃▄▅▆▇█"
+    fake_spark = [2, 3, 4, 3, 5, 4, 6]
+    for m in mods:
+        kinds = ", ".join(k.value for k in sorted(m.kinds, key=lambda k: k.value))[:38]
+        if m.enabled:
+            health = st.ok("● healthy ")
+            state = st.fg("ready ")
+        else:
+            health = st.dim("○ disabled")
+            state = st.dim("off   ")
+        glyph = tokens.MODULE_GLYPHS.get(m.name, "—")
+        mx = max(fake_spark) or 1
+        spark = "".join(bars[min(7, int(v / mx * 7))] for v in fake_spark) if m.enabled else "·······"
+        spark_styled = st.accent(spark) if m.enabled else st.dim(spark)
+        print(f"   {st.bold(m.name):<14}  "
+              f"{st.dim(f'{kinds:<38}')}  "
+              f"{health:<10}  "
+              f"{state:<6}  "
+              f"{glyph:<5}  "
+              f"{spark_styled:<7}", file=sink)
+    print(file=sink)
 
 
 def _print_stats(st: Style, sink) -> None:
+    """Sites bar chart — CATEGORY · COUNT · SHARE columns."""
     from app.modules.username import load_sites
     sites = load_sites()
     cats = Counter((s.get("category") or "uncategorised") for s in sites)
     total = sum(cats.values())
-    top = cats.most_common(20)
-    rows = [f"  {st.bold(f'{total:,}')} total username probe targets", ""]
-    for cat, n in top:
-        bar = "█" * max(1, int(n / max(cats.values()) * 24))
-        rows.append(f"  {cat:<24} {st.cyan(bar):<28} {n:>4}")
-    rows.append("")
-    rows.append(f"  {st.dim('extend via:')} python scripts/sync_sherlock.py | scripts/sync_whatsmyname.py")
-    _box(f"SITES — by {BRAND}", rows, st, sink, color="magenta")
+    mx = max(cats.values()) if cats else 1
+
+    print(file=sink)
+    hdr = (f"   {st.accent(st.bold('bluetm·uz'))}"
+           f"{st.dim('   sites  ·  ')}{st.bold(f'{total:,}')}"
+           f"{st.dim(' probe targets across ')}{st.bold(str(len(cats)))}"
+           f"{st.dim(' categories')}")
+    print(hdr, file=sink)
+    print(file=sink)
+
+    cat_lbl = f"{'CATEGORY':<22}"
+    cnt_lbl = f"{'COUNT':>6}"
+    shr_lbl = f"{'SHARE':<30}"
+    print(f"   {st.accent(st.bold(cat_lbl))}"
+          f"{st.accent(st.bold(cnt_lbl))}  "
+          f"{st.accent(st.bold(shr_lbl))}", file=sink)
+    print(f"   {st.dim('─' * 20)}    {st.dim('──')}  {st.dim('─' * 28)}", file=sink)
+
+    for cat, n in cats.most_common(25):
+        pct = n / total * 100 if total else 0
+        bar = "█" * max(1, int(n / mx * 28))
+        print(f"   {cat:<22}{st.bold(str(n)):>6}  "
+              f"{st.accent(bar):<30}  {st.dim(f'{pct:>4.1f}%')}", file=sink)
+    print(file=sink)
+    print(f"   {st.dim('extend via:')} "
+          f"{st.accent('scripts/sync_sherlock.py')} "
+          f"{st.dim('·')} "
+          f"{st.accent('scripts/sync_whatsmyname.py')}", file=sink)
+    print(file=sink)
 
 
 # ---- main loop --------------------------------------------------------------
