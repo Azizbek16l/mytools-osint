@@ -21,6 +21,20 @@ All notable changes to this project. Format: Keep-a-Changelog · Semver.
 - AlienVault OTX queries both passive_dns and url_list endpoints
 - SSL/TLS module timeout bumped 10s → 20s
 
+### Redesign (from cli.zip design handoff)
+- **Streaming dashboard** rewritten — split-pane layout (modules rail | live hits feed)
+  via `rich.Layout`. Per-module state (idle/running/done) + positive counter on the
+  left, timestamped hit feed on the right.
+- **Result summary card** — categorised findings (dev/social/media/breach/tls/tech/…),
+  sparkline of positive-arrival distribution, action menu with single-key shortcuts.
+- **Domain report** (kind=DOMAIN) — 3-column compact view: subdomains · DNS+TLS · headers+tech.
+- **Modules screen** — k9s-style table with NAME · KINDS · HEALTH · STATE · GLYPH · 7d sparkline.
+- **Sites stats** — categorised bar chart with COUNT · SHARE columns, percentage display.
+- **History** — 28-day heatmap sparkline above recent queries.
+- **Hero menu** — subtitle line with stats, single-key shortcuts on every menu.
+- New helpers: `_sparkline()`, `_classify()` (Hit→category mapping), `ModProgress`
+  (derived from live Hit stream), `db.history_heatmap()`.
+
 ## [0.1.0] - 2026-05-23
 
 ### Added

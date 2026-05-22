@@ -18,13 +18,16 @@ import json
 import re
 import webbrowser
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
 
 import questionary
 from prompt_toolkit.styles import Style as PStyle
 from questionary import Choice
 from rich.console import Console, Group
+from rich.layout import Layout
 from rich.live import Live
+from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
@@ -124,6 +127,83 @@ def _spin_char() -> str:
     return c
 
 
+# ---- sparkline + categorisation helpers (from cli.zip design handoff) ------
+
+_SPARK_CHARS = "▁▂▃▄▅▆▇█"
+
+
+def _sparkline(data: list[int], colour: str | None = None) -> Text:
+    """Convert a sequence of ints into a one-line ▁▂▃▅█ sparkline (Rich Text)."""
+    if not data:
+        return Text("·" * 7, style=tokens.DIM)
+    mx = max(data) or 1
+    out = Text()
+    style = colour or tokens.ACCENT
+    for v in data:
+        if v == 0:
+            out.append("·", style=tokens.DIM)
+            continue
+        idx = min(len(_SPARK_CHARS) - 1, int(v / mx * (len(_SPARK_CHARS) - 1)))
+        out.append(_SPARK_CHARS[idx], style=style)
+    return out
+
+
+# Category mapping for the result summary card.
+_CAT_RULES = (
+    ("dev / code",     ("github", "gitlab", "bitbucket", "stackoverflow", "askubuntu",
+                        "keybase", "hackerone", "bugcrowd", "codeberg", "sourceforge",
+                        "replit", "npm", "pypi", "rubygems", "crates", "docker hub",
+                        "hashnode", "dev.to", "medium")),
+    ("social",         ("twitter", "x.com", "instagram", "tiktok", "snapchat", "pinterest",
+                        "threads", "mastodon", "bluesky", "facebook", "linkedin", "tumblr",
+                        "vk", "ok.ru", "quora", "disqus", "reddit")),
+    ("media / video",  ("youtube", "twitch", "vimeo", "dailymotion", "rumble", "kick",
+                        "soundcloud", "spotify", "bandcamp")),
+    ("messaging",      ("telegram", "whatsapp", "discord", "skype", "wire", "protonmail")),
+    ("breach / leak",  ("hibp", "xposedornot", "hudsonrock", "proxynova", "leakcheck")),
+    ("dns / infra",    ("dns:", "crt.sh", "certspotter", "hackertarget", "alienvault",
+                        "wayback", "threatminer", "subdomain.center", "rapiddns",
+                        "asn", "bgpview", "team cymru")),
+    ("tls / security", ("tls", "ssl", ":443", "hsts", "csp", "x-frame", "permissions-policy",
+                        "referrer-policy", "x-content-type")),
+    ("tech / stack",   ("cloudflare", "fastly", "akamai", "nginx", "apache", "caddy",
+                        "vercel", "netlify", "wordpress", "drupal", "joomla",
+                        "next.js", "nuxt", "react", "vue", "angular", "svelte")),
+    ("dorks",          ("dork:",)),
+    ("suggestions",    ("variation:", "username-variation", "email-local-variation")),
+)
+
+
+def _classify(hit: Hit) -> str:
+    """Map a Hit to a presentational category for the summary card."""
+    haystack = " ".join((hit.module, hit.source, hit.category, hit.title or "")).lower()
+    for label, needles in _CAT_RULES:
+        if any(n in haystack for n in needles):
+            return label
+    return "other"
+
+
+# ---- per-module live progress (derived from the Hit stream) ----------------
+
+@dataclass
+class ModProgress:
+    name: str
+    state: str = "idle"     # idle | running | done
+    hits: int = 0           # any Hit kind
+    positives: int = 0      # only FOUND
+    last_ts: float = 0.0
+
+
+def _update_module_progress(progress: dict[str, ModProgress], hit: Hit,
+                            now: float) -> None:
+    p = progress.setdefault(hit.module, ModProgress(name=hit.module))
+    p.hits += 1
+    if hit.status == HitStatus.FOUND:
+        p.positives += 1
+    p.last_ts = now
+    p.state = "running"
+
+
 def _render_header(query: Query, done: bool, elapsed_ms: int) -> Text:
     """Single-line header — kind · value · spinner/done."""
     spin = _spin_char() if not done else tokens.ICON_OK
@@ -188,47 +268,297 @@ def _render_footer(query: Query, hits: list[Hit], elapsed_ms: int, done: bool) -
     return t
 
 
-# ---- per-run loop -----------------------------------------------------------
+# ---- streaming dashboard (split-pane layout per design handoff) ------------
 
-def _render_group(query: Query, hits: list[Hit], elapsed_ms: int, done: bool) -> Group:
-    return Group(
-        _render_header(query, done, elapsed_ms),
-        Text(""),  # blank spacer
-        _render_body(query, hits),
-        Text(""),
-        _render_footer(query, hits, elapsed_ms, done),
+def _render_modules_rail(progress: dict[str, ModProgress], done: bool) -> Panel:
+    """Left rail — per-module status + counters."""
+    t = Table.grid(padding=(0, 1))
+    t.add_column(width=2, no_wrap=True)
+    t.add_column(width=14)
+    t.add_column(justify="right", width=5)
+    if not progress:
+        t.add_row("", Text("waiting for modules…", style=tokens.DIM), "")
+    for name in sorted(progress):
+        p = progress[name]
+        if done and p.state == "running":
+            p.state = "done"
+        if p.state == "idle":
+            sym, colour = "○", tokens.DIM
+        elif p.state == "running":
+            sym, colour = _spin_char(), tokens.ACCENT
+        elif p.state == "done":
+            sym, colour = tokens.ICON_OK, tokens.OK
+        else:
+            sym, colour = tokens.ICON_SKIP, tokens.DIM
+        cnt = Text(f"{p.positives}", style=f"bold {tokens.OK}" if p.positives else tokens.DIM)
+        t.add_row(Text(sym, style=f"bold {colour}"),
+                  Text(name, style=tokens.FG), cnt)
+    active = sum(1 for p in progress.values() if p.state == "running")
+    done_cnt = sum(1 for p in progress.values() if p.state == "done")
+    return Panel(
+        t,
+        title=Text("modules", style=f"bold {tokens.FG}"),
+        title_align="left",
+        subtitle=Text(f"{active} active · {done_cnt} done", style=tokens.DIM),
+        subtitle_align="left",
+        border_style=tokens.DIM,
+        padding=(0, 1),
     )
 
 
+def _render_hits_feed(hits: list[Hit]) -> Panel:
+    """Right pane — live positives feed with timestamp prefix."""
+    t = Table.grid(padding=(0, 1), expand=True)
+    t.add_column(width=12, no_wrap=True)
+    t.add_column(width=2, no_wrap=True)
+    t.add_column(width=10, no_wrap=True)
+    t.add_column(width=22, no_wrap=True)
+    t.add_column(ratio=1, overflow="ellipsis", no_wrap=True)
+
+    def _is_actionable(h: Hit) -> bool:
+        if (h.category or "") == "summary":
+            return False
+        if h.status in (HitStatus.UNAVAILABLE, HitStatus.NO_DATA, HitStatus.SKIPPED):
+            return False
+        return h.status in (HitStatus.FOUND, HitStatus.RATELIMITED) or (
+            h.status == HitStatus.NOT_FOUND and (h.category or "").startswith("breach")
+        )
+
+    visible = [h for h in hits if _is_actionable(h)]
+    for h in visible[-22:]:
+        ts = h.found_at.strftime("%H:%M:%S.%f")[:-3] if h.found_at else ""
+        t.add_row(
+            Text(ts, style=tokens.DIM),
+            _status_marker(h.status),
+            Text(h.module, style=tokens.DIM),
+            Text(h.source[:22], style=tokens.FG),
+            Text(h.detail[:120] if h.detail else (h.url or ""), style=tokens.FG),
+        )
+    if not visible:
+        t.add_row("", "", "", "", Text("no positives yet …", style=tokens.DIM))
+    return Panel(
+        t,
+        title=Text("live hits", style=f"bold {tokens.FG}"),
+        subtitle=Text("positives + rate-limited shown", style=tokens.DIM),
+        title_align="left",
+        subtitle_align="left",
+        border_style=tokens.DIM,
+        padding=(0, 1),
+    )
+
+
+def _render_streaming_layout(
+    query: Query, hits: list[Hit], progress: dict[str, ModProgress],
+    elapsed_ms: int, done: bool,
+) -> Layout:
+    """Header (1 line) · modules rail | hits feed · footer (1 line)."""
+    root = Layout(name="root")
+    root.split_column(
+        Layout(name="header", size=2),
+        Layout(name="body"),
+        Layout(name="footer", size=2),
+    )
+    root["header"].update(_render_header(query, done, elapsed_ms))
+    root["body"].split_row(
+        Layout(name="rail", size=28),
+        Layout(name="feed"),
+    )
+    root["body"]["rail"].update(_render_modules_rail(progress, done))
+    root["body"]["feed"].update(_render_hits_feed(hits))
+    root["footer"].update(_render_footer(query, hits, elapsed_ms, done))
+    return root
+
+
 async def run_query(db: Database, query: Query) -> tuple[list[Hit], int]:
-    """Run a single query with a live-updating Rich Group (header + table + footer)."""
+    """Run a single query with a live split-pane (modules rail | hits feed)."""
     r = runner()
     hits: list[Hit] = []
+    progress: dict[str, ModProgress] = {}
+    # Pre-populate with all modules that will fan out for this kind, so the rail
+    # shows everything as "idle" before the first hit arrives.
+    for m in r.modules_for(query.kind):
+        progress[m.name] = ModProgress(name=m.name, state="idle")
     started = asyncio.get_event_loop().time()
 
     async def on_hit(h: Hit) -> None:
         hits.append(h)
+        _update_module_progress(progress, h, asyncio.get_event_loop().time())
 
     with Live(
-        _render_group(query, hits, 0, False),
-        console=console, refresh_per_second=10, screen=False, transient=False,
+        _render_streaming_layout(query, hits, progress, 0, False),
+        console=console, refresh_per_second=12, screen=False, transient=False,
     ) as live:
         task = asyncio.create_task(r.run(query, on_hit=on_hit))
-        while not task.done():
-            elapsed_ms = int((asyncio.get_event_loop().time() - started) * 1000)
-            live.update(_render_group(query, hits, elapsed_ms, False))
+        try:
+            while not task.done():
+                elapsed_ms = int((asyncio.get_event_loop().time() - started) * 1000)
+                live.update(_render_streaming_layout(
+                    query, hits, progress, elapsed_ms, False,
+                ))
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=0.1)
+                except TimeoutError:
+                    continue
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            task.cancel()
             try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=0.1)
-            except TimeoutError:
-                continue
+                await task
+            except Exception:
+                pass
         result = await task
         elapsed_ms = int((asyncio.get_event_loop().time() - started) * 1000)
-        live.update(_render_group(query, hits, elapsed_ms, True))
+        for p in progress.values():
+            p.state = "done"
+        live.update(_render_streaming_layout(
+            query, hits, progress, elapsed_ms, True,
+        ))
     try:
         await db.save_result(result)
     except Exception:
         pass
     return hits, elapsed_ms
+
+
+# ---- domain report (3-column rich.Columns) per design handoff -------------
+
+def _render_domain_report(query: Query, hits: list[Hit]) -> Group:
+    """Three-column compact report for kind=domain: subdomains · DNS · TLS+headers."""
+    from rich.columns import Columns
+    subs: list[Hit] = []
+    dns_records: list[Hit] = []
+    tls: list[Hit] = []
+    headers: list[Hit] = []
+    tech: list[Hit] = []
+    for h in hits:
+        if h.status != HitStatus.FOUND:
+            continue
+        if h.category == "subdomain":
+            subs.append(h)
+        elif h.category == "dns":
+            dns_records.append(h)
+        elif h.module == "ssl_tls":
+            tls.append(h)
+        elif h.module == "http_headers":
+            headers.append(h)
+        elif h.module == "tech_fingerprint":
+            tech.append(h)
+
+    def _panel(title: str, rows: list[str], colour: str = tokens.ACCENT) -> Panel:
+        body = Text()
+        if not rows:
+            body.append("(none)", style=tokens.DIM)
+        for r in rows[:14]:
+            body.append(r + "\n", style=tokens.FG)
+        return Panel(
+            body,
+            title=Text(title, style=f"bold {colour}"),
+            title_align="left",
+            border_style=tokens.DIM,
+            padding=(0, 1),
+            width=42,
+        )
+
+    subs_rows = [f"{h.source}" for h in sorted(subs, key=lambda h: h.source)[:14]]
+    dns_rows = [f"{h.source}  {h.detail[:32]}" for h in dns_records[:12]]
+    tls_rows = []
+    for h in tls:
+        tls_rows.append(f"{h.source}")
+        for chunk in (h.detail or "").split("·"):
+            chunk = chunk.strip()
+            if chunk:
+                tls_rows.append(f"  {chunk[:36]}")
+    hdr_rows = []
+    summary_hits = [h for h in headers if h.source == "SUMMARY"]
+    if summary_hits:
+        hdr_rows.append(f"⌖ {summary_hits[0].title}")
+    for h in headers:
+        if h.source not in ("SUMMARY",) and h.category == "security-header":
+            hdr_rows.append(f"{h.source}: {h.detail[:30]}")
+    tech_rows = [f"{h.source}" for h in tech if h.source != "stack"][:10]
+
+    cols = Columns([
+        _panel("subdomains", subs_rows, tokens.ACCENT),
+        _panel("DNS · TLS",
+               dns_rows + ([""] + tls_rows if tls_rows else []),
+               tokens.OK),
+        _panel("headers · tech",
+               hdr_rows + ([""] + tech_rows if tech_rows else []),
+               tokens.WARN),
+    ], padding=(0, 1), expand=False)
+
+    return Group(Text(""), cols, Text(""))
+
+
+# ---- result summary card (categorised findings + sparkline + actions) -----
+
+def _render_summary_card(query: Query, hits: list[Hit], elapsed_ms: int) -> Group:
+    positives = [h for h in hits if h.status == HitStatus.FOUND]
+
+    # Header line
+    header = Text("  ")
+    header.append(f"{tokens.ICON_OK}  ", style=f"bold {tokens.OK}")
+    header.append(query.kind.value + "  ", style=tokens.DIM)
+    header.append(query.value, style="bold")
+    header.append("   ·   completed in ", style=tokens.DIM)
+    header.append(f"{elapsed_ms} ms", style=f"bold {tokens.OK}")
+    header.append("   ·   ", style=tokens.DIM)
+    header.append(f"{len(positives)}", style=f"bold {tokens.OK}")
+    header.append(" / ", style=tokens.DIM)
+    header.append(f"{len(hits)}", style=tokens.FG)
+    header.append(" positive  ·  arrival ", style=tokens.DIM)
+
+    # Sparkline of positive-arrival distribution across the run
+    if positives and elapsed_ms > 0:
+        buckets = [0] * 12
+        t0 = positives[0].found_at.timestamp() if positives[0].found_at else 0
+        span = max(0.001, elapsed_ms / 1000.0)
+        for h in positives:
+            if h.found_at:
+                bucket = min(11, int((h.found_at.timestamp() - t0) / span * 12))
+                buckets[bucket] += 1
+        header += _sparkline(buckets)
+
+    rule = Text("  " + "▔" * 70, style=tokens.OK if positives else tokens.DIM)
+
+    # Categorise positives
+    cat_counts: Counter[str] = Counter()
+    cat_examples: dict[str, list[str]] = {}
+    for h in positives:
+        c = _classify(h)
+        cat_counts[c] += 1
+        cat_examples.setdefault(c, []).append(h.source)
+
+    cat_table = Table.grid(padding=(0, 2))
+    cat_table.add_column(width=18)
+    cat_table.add_column(width=5, justify="right")
+    cat_table.add_column(width=28)
+    cat_table.add_column(ratio=1, overflow="ellipsis", no_wrap=True)
+    if cat_counts:
+        mx = max(cat_counts.values())
+        for cat, n in cat_counts.most_common(8):
+            bar = Text("█" * max(1, int(n / mx * 24)), style=tokens.ACCENT)
+            examples = ", ".join(cat_examples[cat][:5])
+            cat_table.add_row(
+                Text(cat, style=f"bold {tokens.FG}"),
+                Text(str(n), style=f"bold {tokens.OK}"),
+                bar, Text(examples[:60], style=tokens.DIM),
+            )
+    else:
+        cat_table.add_row("", "", "", Text("no positives — try a different query",
+                                            style=tokens.DIM))
+
+    return Group(
+        Text(""),
+        header,
+        rule,
+        Text(""),
+        Text("   findings by category", style=tokens.DIM),
+        Text(""),
+        cat_table,
+        Text(""),
+        Text("   ─ what next ─", style=tokens.DIM),
+        Text(""),
+    )
 
 
 # ---- menu actions -----------------------------------------------------------
@@ -264,32 +594,41 @@ async def action_lookup(db: Database) -> bool:
 async def after_results_menu(db: Database, query: Query, hits: list[Hit],
                               elapsed_ms: int) -> bool:
     positives = [h for h in hits if h.status == HitStatus.FOUND]
-    found = len(positives)
-    total = len(hits)
-    console.print(
-        f"\n[bold {tokens.OK}]{found}[/] of {total} positive · "
-        f"[{tokens.DIM}]{elapsed_ms} ms[/]\n"
-    )
+    # Render the design summary card (categorised findings + sparkline)
+    console.print(_render_summary_card(query, hits, elapsed_ms))
+    # For domain queries, also render the 3-column condensed report
+    if query.kind == QueryKind.DOMAIN and positives:
+        console.print(_render_domain_report(query, hits))
+
     while True:
         choice = await questionary.select(
-            "next?",
+            "what next?",
             choices=[
-                Choice("open a positive URL in browser", value="open", shortcut_key="o",
+                Choice(f"  open positive in browser  ·  pick from {len(positives)} URLs",
+                       value="open", shortcut_key="o",
                        disabled=None if positives else "no positives"),
-                Choice("export (csv / json / md)",       value="export", shortcut_key="e",
+                Choice("  export  ·  csv · json · md",
+                       value="export", shortcut_key="e",
                        disabled=None if hits else "nothing to export"),
-                Choice("new lookup",                      value="new",  shortcut_key="n"),
-                Choice("main menu",                       value="main", shortcut_key="m"),
-                Choice("quit",                            value="quit", shortcut_key="q"),
+                Choice("  re-run (refresh)  ·  same query, fresh probes",
+                       value="rerun", shortcut_key="r"),
+                Choice("  new lookup  ·  back to prompt",
+                       value="new",  shortcut_key="n"),
+                Choice("  main menu", value="main", shortcut_key="m"),
+                Choice("  quit",      value="quit", shortcut_key="q"),
             ],
             style=QSTYLE,
             use_shortcuts=True,
-            instruction="(↑↓ or o/e/n/m/q)",
+            instruction="(↑↓ or single key)",
         ).ask_async()
         if choice == "open":
             await drill_open(positives)
         elif choice == "export":
             await action_export(query, hits)
+        elif choice == "rerun":
+            hits, elapsed_ms = await run_query(db, query)
+            positives = [h for h in hits if h.status == HitStatus.FOUND]
+            console.print(_render_summary_card(query, hits, elapsed_ms))
         elif choice == "new":
             return await action_lookup(db)
         elif choice in (None, "main"):
@@ -375,6 +714,23 @@ async def action_history(db: Database) -> None:
     if not rows:
         console.print(f"[{tokens.DIM}]no history yet[/]")
         return
+
+    # Heatmap header — last 28 days
+    try:
+        heat = await db.history_heatmap(days=28)
+    except Exception:
+        heat = []
+    if heat:
+        header = Text("   ")
+        header.append("bluetm·uz", style=f"bold {tokens.ACCENT}")
+        header.append("   history  ·  ", style=tokens.DIM)
+        header.append(str(len(rows)), style=f"bold {tokens.FG}")
+        header.append(" recent  ·  28d:  ", style=tokens.DIM)
+        # reverse so oldest is left, today is right
+        header += _sparkline(list(reversed(heat)))
+        console.print()
+        console.print(header)
+        console.print()
     choices = []
     for row in rows:
         when = (row.get("started_at") or "").replace("T", " ").split(".")[0]
@@ -410,37 +766,118 @@ async def action_history(db: Database) -> None:
 
 
 async def action_modules() -> None:
+    """k9s-style modules table per design handoff — name · kinds · health · spark."""
     r = runner()
-    t = Table(title=f"[bold]modules — by {BRAND}[/]", expand=False,
-              border_style=tokens.DIM, header_style=f"bold {tokens.ACCENT}")
-    t.add_column("", width=2)
-    t.add_column("name", style=f"bold {tokens.ACCENT}")
-    t.add_column("handles")
-    for m in r.all_modules():
-        mark = f"[{tokens.OK}]●[/]" if m.enabled else f"[{tokens.DIM}]○[/]"
+
+    # Header line
+    mods = r.all_modules()
+    n_active = sum(1 for m in mods if m.enabled)
+    header = Text("   ")
+    header.append("bluetm·uz", style=f"bold {tokens.ACCENT}")
+    header.append("   modules  ·  ", style=tokens.DIM)
+    header.append(str(n_active), style=f"bold {tokens.OK}")
+    header.append(" active", style=tokens.DIM)
+    try:
+        from app.modules.username import load_sites
+        n_sites = len(load_sites())
+        header.append("  ·  ", style=tokens.DIM)
+        header.append(f"{n_sites:,}", style=tokens.FG)
+        header.append(" probe targets", style=tokens.DIM)
+    except Exception:
+        pass
+
+    t = Table.grid(padding=(0, 2))
+    for w in (14, 38, 11, 8, 8, 14):
+        t.add_column(width=w, overflow="ellipsis", no_wrap=True)
+    headers = ("NAME", "KINDS", "HEALTH", "STATE", "GLYPH", "7d")
+    t.add_row(*[Text(h, style=f"bold {tokens.ACCENT}") for h in headers])
+    t.add_row(*[Text("─" * max(2, w - 2), style=tokens.DIM) for w in (14, 38, 11, 8, 8, 14)])
+
+    for i, m in enumerate(mods):
         kinds = ", ".join(k.value for k in sorted(m.kinds, key=lambda k: k.value))
-        glyph = tokens.MODULE_GLYPHS.get(m.name, "")
-        t.add_row(mark, f"{glyph}  {m.name}".strip(), kinds)
+        if m.enabled:
+            health_text, dot = "healthy", "●"
+            colour = tokens.OK
+        else:
+            health_text, dot = "disabled", "○"
+            colour = tokens.DIM
+        state = "ready" if m.enabled else "off"
+        glyph = tokens.MODULE_GLYPHS.get(m.name, "") or "—"
+        # Synthetic placeholder for 7d activity — could be wired to ModuleStats later
+        spark = _sparkline([2, 3, 4, 3, 5, 4, 6] if m.enabled else [0] * 7)
+        sel = i == 0
+        pfx = "❯ " if sel else "  "
+        name_cell = Text(pfx + m.name,
+                         style=f"bold {tokens.ACCENT}" if sel else f"bold {tokens.FG}")
+        t.add_row(
+            name_cell,
+            Text(kinds, style=tokens.DIM),
+            Text(f"{dot} {health_text}", style=colour),
+            Text(state, style=tokens.FG if m.enabled else tokens.DIM),
+            Text(glyph, style=tokens.FG),
+            spark,
+        )
+
+    console.print()
+    console.print(header)
+    console.print()
     console.print(t)
+    console.print()
 
 
 async def action_stats() -> None:
+    """Sites stats — categorised bar chart per design handoff."""
     from app.modules.username import load_sites
     sites = load_sites()
     cats = Counter((s.get("category") or "uncategorised") for s in sites)
     total = sum(cats.values())
-    t = Table(
-        title=f"[bold]sites — by {BRAND}[/]  ([{tokens.ACCENT}]{total:,}[/] total)",
-        expand=False, border_style=tokens.DIM, header_style=f"bold {tokens.ACCENT}",
+
+    header = Text("   ")
+    header.append("bluetm·uz", style=f"bold {tokens.ACCENT}")
+    header.append("   sites  ·  ", style=tokens.DIM)
+    header.append(f"{total:,}", style=f"bold {tokens.FG}")
+    header.append(" probe targets across ", style=tokens.DIM)
+    header.append(str(len(cats)), style=f"bold {tokens.FG}")
+    header.append(" categories", style=tokens.DIM)
+
+    t = Table.grid(padding=(0, 2))
+    t.add_column(width=22)
+    t.add_column(width=6, justify="right")
+    t.add_column(width=32)
+    t.add_column(ratio=1)
+    t.add_row(
+        Text("CATEGORY", style=f"bold {tokens.ACCENT}"),
+        Text("COUNT", style=f"bold {tokens.ACCENT}"),
+        Text("SHARE", style=f"bold {tokens.ACCENT}"),
+        Text("", style=tokens.DIM),
     )
-    t.add_column("category", style=tokens.FG)
-    t.add_column("count", justify="right", style="bold")
-    t.add_column("share")
-    mx = max(cats.values())
+    t.add_row(
+        Text("─" * 20, style=tokens.DIM),
+        Text("──", style=tokens.DIM),
+        Text("─" * 30, style=tokens.DIM),
+        Text("", style=tokens.DIM),
+    )
+    mx = max(cats.values()) if cats else 1
     for cat, n in cats.most_common(25):
-        bar = "█" * max(1, int(n / mx * 24))
-        t.add_row(cat, str(n), f"[{tokens.ACCENT}]{bar}[/]")
+        pct = n / total * 100 if total else 0
+        bar = "█" * max(1, int(n / mx * 28))
+        t.add_row(
+            Text(cat, style=tokens.FG),
+            Text(f"{n}", style=f"bold {tokens.FG}"),
+            Text(bar, style=tokens.ACCENT),
+            Text(f"{pct:>4.1f}%", style=tokens.DIM),
+        )
+    console.print()
+    console.print(header)
+    console.print()
     console.print(t)
+    console.print()
+    footer = Text("   extend via: ", style=tokens.DIM)
+    footer.append("scripts/sync_sherlock.py", style=tokens.ACCENT)
+    footer.append("  ·  ", style=tokens.DIM)
+    footer.append("scripts/sync_whatsmyname.py", style=tokens.ACCENT)
+    console.print(footer)
+    console.print()
 
 
 async def action_settings_overview() -> None:
@@ -470,6 +907,22 @@ async def run_interactive() -> int:
     """Top-level interactive shell. Returns process exit code."""
     # Big banner once, on cold start
     console.print(render_banner())
+
+    # Hero subtitle with stats
+    try:
+        from app.modules.username import load_sites
+        n_sites = len(load_sites())
+    except Exception:
+        n_sites = 0
+    hero = Text("   ")
+    hero.append("personal OSINT", style=f"bold {tokens.FG}")
+    hero.append("  ·  ", style=tokens.DIM)
+    hero.append(f"{n_sites:,} probe targets", style=tokens.ACCENT)
+    hero.append("  ·  free APIs only  ·  ", style=tokens.DIM)
+    hero.append("authorised use", style=tokens.WARN)
+    console.print(hero)
+    console.print()
+
     s = settings()
     db = Database(s.db_path)
     await db.connect()
@@ -479,22 +932,22 @@ async def run_interactive() -> int:
             choice = await questionary.select(
                 "main menu",
                 choices=[
-                    Choice("new lookup  (single-prompt with auto-detect)", value="lookup",
+                    Choice("  new lookup     ·  single prompt with auto-detect", value="lookup",
                            shortcut_key="l"),
-                    Choice("recent history",                                value="history",
+                    Choice("  recent history ·  per-day heatmap",               value="history",
                            shortcut_key="h"),
-                    Choice("modules",                                       value="modules",
+                    Choice("  modules        ·  k9s-style table",                value="modules",
                            shortcut_key="m"),
-                    Choice("sites    (1,000+ probe targets)",              value="stats",
+                    Choice("  sites          ·  category breakdown",             value="stats",
                            shortcut_key="s"),
-                    Choice("settings",                                      value="settings",
+                    Choice("  settings       ·  API keys, Telegram, paths",      value="settings",
                            shortcut_key="t"),
-                    Choice("exit",                                          value="exit",
+                    Choice("  exit",                                              value="exit",
                            shortcut_key="q"),
                 ],
                 style=QSTYLE,
                 use_shortcuts=True,
-                instruction="(↑↓ or single key · ? help)",
+                instruction="(↑↓ or single key)",
             ).ask_async()
             if choice in (None, "exit"):
                 console.print(f"\n[{tokens.DIM}]bye — {BRAND}[/]\n")

@@ -123,6 +123,25 @@ class Database:
         await self._conn.commit()
         return qid
 
+    async def history_heatmap(self, days: int = 28) -> list[int]:
+        """Per-day query counts for the last N days. Index 0 = today, N-1 = oldest."""
+        assert self._conn is not None
+        async with self._conn.execute(
+            """SELECT CAST(julianday('now') - julianday(started_at) AS INTEGER) AS d,
+                      COUNT(*) AS n
+               FROM queries
+               WHERE julianday('now') - julianday(started_at) < ?
+               GROUP BY d""",
+            (days,),
+        ) as cur:
+            rows = await cur.fetchall()
+        out = [0] * days
+        for r in rows:
+            i = int(r["d"])
+            if 0 <= i < days:
+                out[i] = r["n"]
+        return out
+
     async def list_history(self, limit: int = 100) -> list[dict[str, Any]]:
         assert self._conn is not None
         async with self._conn.execute(
