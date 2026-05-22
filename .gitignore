@@ -32,6 +32,7 @@ data/telethon/
 *.dist/
 *.onefile-build/
 dist/
+nuitka-crash-report.xml
 
 # IDE
 .vscode/
