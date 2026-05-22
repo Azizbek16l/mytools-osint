@@ -37,7 +37,6 @@ from app.core.runner import runner
 from app.core.types import Hit, HitStatus, Query, QueryKind
 from app.ui import tokens
 from app.ui.banner import BRAND
-from app.ui.banner import render as render_banner
 
 console = Console(highlight=False, force_terminal=tokens.colour_enabled() or None)
 
@@ -564,13 +563,33 @@ def _render_summary_card(query: Query, hits: list[Hit], elapsed_ms: int) -> Grou
 # ---- menu actions -----------------------------------------------------------
 
 async def action_lookup(db: Database) -> bool:
-    """Single-prompt input — infer kind from value. Disambiguate only when needed."""
+    """Single-prompt input — infer kind from value. Disambiguate only when needed.
+
+    Hint line is printed ABOVE the prompt so the input box is clean.
+    """
+    console.print()
+    hint = Text("   ")
+    hint.append("what are you looking for?", style=f"bold {tokens.FG}")
+    console.print(hint)
+    examples = Text("   ")
+    examples.append("examples:  ", style=tokens.DIM)
+    examples.append("torvalds", style=tokens.ACCENT)
+    examples.append("   ", style=tokens.DIM)
+    examples.append("me@example.com", style=tokens.ACCENT)
+    examples.append("   ", style=tokens.DIM)
+    examples.append("+998948241222", style=tokens.ACCENT)
+    examples.append("   ", style=tokens.DIM)
+    examples.append("@durov", style=tokens.ACCENT)
+    examples.append("   ", style=tokens.DIM)
+    examples.append("marsits.uz", style=tokens.ACCENT)
+    console.print(examples)
+    console.print()
     value = await questionary.text(
-        "lookup",
-        instruction=" (username · email · +phone · @tg · domain · ip — Enter to run, Esc to back)",
+        "",
         style=QSTYLE,
         validate=lambda s: True if s.strip() else "cannot be empty",
-        qmark=">",
+        qmark="❯",
+        instruction="",
     ).ask_async()
     if not value:
         return True
@@ -906,21 +925,14 @@ async def action_settings_overview() -> None:
 async def run_interactive() -> int:
     """Top-level interactive shell. Returns process exit code.
 
-    Hero matches the design mockup (screens-a.jsx · SCREEN 1):
-        BANNER
-        ● online · N sites · M modules · free APIs · authorised use only
-        ┌── main menu ───────────────────────────────────────────────────
-          [L]  new lookup       single prompt with auto-detect
-          [H]  recent history   …
-          …
-        └────────────────────────────────────────────────────────────────
-        ↑↓ navigate  ↵ select  / jump  ? help  q quit  ·  ● ready
+    Cold-start: BLUETM.UZ figlet (once) + single status subtitle.
+    Each iteration: subtle section header → questionary list (no chrome).
     """
-    # Big banner once, on cold start
-    console.print(render_banner())
-
-    # Hero status subtitle (matches mockup line 38-48)
+    # Banner figlet ONLY (skip the .render() subtitles to avoid duplicates)
     from app import __version__ as _ver
+    from app.ui.banner import ASCII_ART
+    console.print(Text(ASCII_ART, style=tokens.ACCENT))
+
     try:
         from app.modules.username import load_sites
         n_sites = len(load_sites())
@@ -957,10 +969,12 @@ async def run_interactive() -> int:
     await db.connect()
     try:
         while True:
-            # Render the design's main-menu divider chrome
-            console.print(Text("   ").append("┌── ", style=tokens.DIM)
-                          .append("main menu", style=f"bold {tokens.FG}")
-                          .append(" ─" * 32 + "──", style=tokens.DIM))
+            # Subtle section header (no closing divider — questionary clears its own area)
+            header = Text("   ")
+            header.append("── ", style=tokens.DIM)
+            header.append("main menu", style=f"bold {tokens.FG}")
+            header.append(" " + ("─" * 70), style=tokens.DIM)
+            console.print(header)
             console.print()
             choice = await questionary.select(
                 "",
@@ -981,21 +995,8 @@ async def run_interactive() -> int:
                 style=QSTYLE,
                 use_shortcuts=True,
                 qmark="",
-                instruction="",
+                instruction="(↑↓ or single key  ·  ↵ select)",
             ).ask_async()
-            # Render the closing divider + footer (only when not exiting)
-            console.print(Text("   ").append("└" + ("─" * 75), style=tokens.DIM))
-            console.print()
-            footer = Text("   ")
-            for k, lbl in (("↑↓", " navigate  "), ("↵", " select  "),
-                           ("/", " jump  "), ("?", " help  "), ("q", " quit")):
-                footer.append(k, style=f"bold {tokens.ACCENT}")
-                footer.append(lbl, style=tokens.DIM)
-            footer.append("  ·  ", style=tokens.DIM)
-            footer.append("●", style=tokens.OK)
-            footer.append(" ready", style=tokens.DIM)
-            console.print(footer)
-            console.print()
             if choice in (None, "exit"):
                 console.print(f"\n[{tokens.DIM}]bye — {BRAND}[/]\n")
                 return 0
