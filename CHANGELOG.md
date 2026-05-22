@@ -10,7 +10,16 @@ All notable changes to this project. Format: Keep-a-Changelog · Semver.
 - `app/modules/http_headers.py` — security header scorer (Mozilla Observatory rubric)
 - `app/modules/asn_bgp.py` — Team Cymru WHOIS + BGPView (free, no key)
 - `app/modules/tech_fingerprint.py` — Wappalyzer-lite stack detection (~30 sigs)
-- Distribution foundation — `pyproject.toml` hatch backend, GitHub Actions release workflow, Dockerfile, Homebrew formula stub.
+- Distribution foundation — `pyproject.toml` hatch backend, GitHub Actions release workflow, Dockerfile, Homebrew formula stub, .deb/.rpm/AppImage build via fpm.
+
+### Changed
+- **Domain module rewritten** for proper subdomain enumeration. Each discovered subdomain now emits as its own Hit with the FQDN visible in the source column. Sources expanded from 3 → 8: crt.sh, Certspotter, HackerTarget, AlienVault OTX, subdomain.center, RapidDNS, Wayback CDX, ThreatMiner. Cross-source attestation shown ("seen by N sources").
+
+### Fixed
+- crt.sh timeout (was 30s, now 90s + 1 retry — service is slow on popular domains)
+- Wayback CDX query uses `matchType=domain` for proper subdomain enumeration
+- AlienVault OTX queries both passive_dns and url_list endpoints
+- SSL/TLS module timeout bumped 10s → 20s
 
 ## [0.1.0] - 2026-05-23
 
