@@ -810,8 +810,39 @@ async def action_history(db: Database) -> None:
 
 
 async def action_modules() -> None:
-    """k9s-style modules table per design handoff — name · kinds · health · spark."""
+    """k9s-style modules table — interactive: arrow-select to toggle enable/disable."""
     r = runner()
+    await _render_modules_table(r)
+    # Interactive toggle loop
+    while True:
+        mods = r.all_modules()
+        choices = []
+        for m in mods:
+            mark = "●" if m.enabled else "○"
+            label = f"  {mark}  {m.name:<18}  {'on' if m.enabled else 'off'}"
+            choices.append(Choice(label, value=m.name))
+        choices.append(Choice("  ← back to main menu", value=None))
+        pick = await questionary.select(
+            "toggle a module:",
+            choices=choices,
+            style=QSTYLE,
+            qmark="",
+            instruction="(↵ flip enabled/disabled  ·  ← back)",
+        ).ask_async()
+        if pick is None:
+            break
+        # Toggle and refresh
+        target = next((m for m in mods if m.name == pick), None)
+        if target:
+            r.set_enabled(pick, not target.enabled)
+            console.print(
+                f"[{tokens.OK if not target.enabled else tokens.WARN}]"
+                f"{'enabled' if not target.enabled else 'disabled'}[/]  {pick}"
+            )
+
+
+async def _render_modules_table(r) -> None:
+    """Render the k9s-style table (no questionary)."""
 
     # Header line
     mods = r.all_modules()
@@ -869,6 +900,17 @@ async def action_modules() -> None:
     console.print()
 
 
+async def _press_enter() -> None:
+    """Pause until the user acknowledges — used after read-only screens."""
+    try:
+        await questionary.text(
+            "press Enter to return", style=QSTYLE, qmark="", instruction="",
+            default="",
+        ).ask_async()
+    except Exception:
+        pass
+
+
 async def action_stats() -> None:
     """Sites stats — categorised bar chart per design handoff."""
     from app.modules.username import load_sites
@@ -922,6 +964,7 @@ async def action_stats() -> None:
     footer.append("scripts/sync_whatsmyname.py", style=tokens.ACCENT)
     console.print(footer)
     console.print()
+    await _press_enter()
 
 
 async def action_settings_overview() -> None:
@@ -1035,7 +1078,14 @@ async def run_interactive() -> int:
             elif choice == "stats":
                 await action_stats()
             elif choice == "settings":
-                await action_settings_overview()
+                # Open the FULL settings wizard (set/unset/Telegram/edit) — not
+                # just a read-only overview. Runs in this loop so it doesn't
+                # quit the shell when done.
+                from app.ui.config_cli import cmd_wizard
+                try:
+                    cmd_wizard()
+                except Exception as e:
+                    console.print(f"[{tokens.BAD}]settings wizard error:[/] {e}")
     except (KeyboardInterrupt, EOFError):
         console.print(f"\n[{tokens.DIM}]bye — {BRAND}[/]\n")
         return 130
