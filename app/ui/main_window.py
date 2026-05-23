@@ -54,6 +54,13 @@ def infer_kind(value: str) -> QueryKind | None:
     v = value.strip()
     if not v:
         return None
+    # IPv4 / IPv6 first (otherwise IPv6 like 2001:db8::1 → USERNAME).
+    import ipaddress
+    try:
+        ipaddress.ip_address(v.split("/", 1)[0])
+        return QueryKind.IP
+    except ValueError:
+        pass
     if _EMAIL_RE.match(v):
         return QueryKind.EMAIL
     digits = re.sub(r"\D", "", v)

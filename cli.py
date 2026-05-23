@@ -20,6 +20,7 @@ import argparse
 import asyncio
 import csv
 import io
+import ipaddress
 import json
 import os
 import re
@@ -51,6 +52,14 @@ _DOMAIN_RE = re.compile(
 
 def infer_kind(value: str) -> QueryKind:
     v = value.strip()
+    # IPv4 / IPv6 — must be checked BEFORE the domain regex, otherwise an IPv6
+    # address falls through to USERNAME (1000-site probe blast) and IPv4 only
+    # reaches the IP module by accident via _DOMAIN_RE.
+    try:
+        ipaddress.ip_address(v.split("/", 1)[0])
+        return QueryKind.IP
+    except ValueError:
+        pass
     if _EMAIL_RE.match(v):
         return QueryKind.EMAIL
     digits = re.sub(r"\D", "", v)

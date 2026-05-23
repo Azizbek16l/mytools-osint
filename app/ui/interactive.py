@@ -14,6 +14,7 @@ Design (per senior UX + designer review, 2026-05):
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import re
 import webbrowser
@@ -76,6 +77,12 @@ def _auto_kind(value: str) -> QueryKind | None:
     v = value.strip()
     if not v:
         return None
+    # IPv4 / IPv6 first (otherwise IPv6 falls through to USERNAME).
+    try:
+        ipaddress.ip_address(v.split("/", 1)[0])
+        return QueryKind.IP
+    except ValueError:
+        pass
     if _EMAIL_RE.match(v):
         return QueryKind.EMAIL
     digits = re.sub(r"\D", "", v)
