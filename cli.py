@@ -2,10 +2,10 @@
 
 Examples:
   osint torvalds                         auto-detect kind from value
-  osint me@example.com                   email lookup (breach + Holehe + derived)
-  osint +998948241222                    phone (libphonenumber + Telegram MTProto)
+  osint satya@microsoft.com              email lookup (breach + Holehe + derived)
+  osint +1 415 555 0143                  phone (libphonenumber + Telegram MTProto)
   osint @durov                           Telegram username via MTProto
-  osint marsits.uz                       domain (crt.sh + DNS + HackerTarget + urlscan)
+  osint github.com                       domain (crt.sh + DNS + HackerTarget + urlscan)
   osint 8.8.8.8                          IP (rDNS + IPinfo)
 
   osint --kind username torvalds         force kind
@@ -179,7 +179,7 @@ def _result_box(result, elapsed_ms: int, st: Style, sink) -> None:
 def _print_no_arg_panel(st: Style, sink) -> None:
     rows = [
         f"  {st.green('osint <value>')}                          auto-detect kind",
-        f"  {st.green('osint --kind email')} me@example.com      explicit kind",
+        f"  {st.green('osint --kind email')} satya@microsoft.com explicit kind",
         f"  {st.green('osint torvalds --json --out')} r.json     machine-readable",
         f"  {st.green('osint --list-modules')}                   what's loaded",
         f"  {st.green('osint --list-stats')}                     site dataset breakdown",

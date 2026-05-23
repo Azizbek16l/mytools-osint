@@ -38,7 +38,7 @@ console = Console(highlight=False)
 KNOBS: list[tuple[str, str, bool]] = [
     ("TELEGRAM_API_ID",    "Telegram api_id (from my.telegram.org/apps)",   False),
     ("TELEGRAM_API_HASH",  "Telegram api_hash",                              True),
-    ("TELEGRAM_PHONE",     "Telegram phone (E.164, e.g. +998948241222)",     False),
+    ("TELEGRAM_PHONE",     "Telegram phone (E.164, e.g. +14155550143)",      False),
     ("HIBP_API_KEY",       "HaveIBeenPwned API key (paid — optional)",       True),
     ("NUMVERIFY_API_KEY",  "Numverify API key (free 100/mo — optional)",     True),
     ("IPINFO_API_TOKEN",   "IPinfo API token (free 50k/mo — optional)",      True),
@@ -271,7 +271,7 @@ def cmd_telegram_wizard() -> int:
         ).ask() or api_hash
         new_phone = questionary.text(
             "TELEGRAM_PHONE:", default=phone or "",
-            instruction=" (E.164 — e.g. +998948241222)",
+            instruction=" (E.164 — e.g. +14155550143)",
             style=QSTYLE,
         ).ask() or phone
         if new_id:

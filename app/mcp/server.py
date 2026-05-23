@@ -129,7 +129,7 @@ _TOOL_KINDS: list[tuple[str, QueryKind, str, dict[str, dict[str, Any]]]] = [
         "lookup_phone",
         QueryKind.PHONE,
         "Phone number parsing (libphonenumber) + carrier/region metadata.",
-        {"phone": {"type": "string", "description": "E.164 phone number, e.g. +998948241222."}},
+        {"phone": {"type": "string", "description": "E.164 phone number, e.g. +14155550143."}},
     ),
     (
         "lookup_whatsapp",

@@ -840,7 +840,7 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
     console.print(hint)
     examples = Text("   ")
     examples.append("examples:  ", style=tokens.DIM)
-    for e in ("torvalds", "me@example.com", "+998948241222", "@durov", "marsits.uz"):
+    for e in ("torvalds", "satya@microsoft.com", "+1 415 555 0143", "@durov", "github.com"):
         examples.append(e, style=tokens.ACCENT)
         examples.append("   ", style=tokens.DIM)
     console.print(examples)
