@@ -24,6 +24,7 @@ jobs:
       TELEGRAM_AGENT_CHANNEL:   ${{ secrets.TELEGRAM_AGENT_CHANNEL }}
       OLLAMA_HOST: ${{ secrets.OLLAMA_HOST }}        # optional; empty = skipped
       OLLAMA_MODEL: ${{ secrets.OLLAMA_MODEL }}      # optional
+      BLUETM_AGENT_SKIP_CLAUDE: "1"                  # OAuth lives on user's host, not in CI
     steps:
       - uses: actions/checkout@v4
         with:

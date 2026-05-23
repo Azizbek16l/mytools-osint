@@ -25,6 +25,7 @@ from agent.tasks import (  # noqa: E402
     badge_update,
     canary_probe,
     changelog_update,
+    claude_improvements,
     issue_triage,
     ollama_improvements,
     sync_datasets,
@@ -59,10 +60,13 @@ TASKS: dict[str, Callable[[], Awaitable[str]]] = {
     "sync_datasets":      sync_datasets.run,
     "canary_probe":       canary_probe.run,
     "changelog_update":   changelog_update.run,
-    "telegram_announce":  telegram_announce.run,
-    "badge_update":       badge_update.run,
-    "issue_triage":       issue_triage.run,
-    "ollama_improvements": ollama_improvements.run,   # skipped silently if OLLAMA_HOST unset
+    "telegram_announce":   telegram_announce.run,
+    "badge_update":        badge_update.run,
+    "issue_triage":        issue_triage.run,
+    # Use the user's Claude Code subscription (OAuth-backed, no extra cost).
+    # Falls back to Ollama if the SDK / CLI aren't installed.
+    "claude_improvements": claude_improvements.run,
+    "ollama_improvements": ollama_improvements.run,
 }
 
 

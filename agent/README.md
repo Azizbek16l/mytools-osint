@@ -57,20 +57,60 @@ Already present at `.github/workflows/agent-daily.yml`. Runs at 03:00 UTC.
 Trigger manually first via the GitHub Actions UI to confirm everything wires
 up before relying on the cron.
 
-### 3. (Optional) Local Ollama hook
+### 3. LLM-driven improvement proposals — TWO free paths
 
-If you want autonomous code-improvement proposals (small refactors, comment
-cleanups, regex tuning), point the agent at your existing Ollama install on
-`root2`:
+The agent will gladly skip LLM tasks if neither path is available. Pick one:
+
+**A. Claude Code subscription (recommended — no extra cost on Pro/Max)**
+
+The agent uses your already-logged-in Claude Code OAuth token via the
+`claude-agent-sdk`. Usage counts against your Pro/Max plan quota — no API
+key, no separate metering.
+
+```powershell
+# one-time:
+npm install -g @anthropic-ai/claude-code
+claude login                                     # opens browser, finishes OAuth
+pip install claude-agent-sdk
+
+# wire it into the daily Task Scheduler entry (Windows):
+pwsh .\scripts\install_local_agent.ps1
+```
+
+The daily local task runs the full agent including `claude_improvements`,
+which writes proposals to `agent/data/proposals/` for human review. Never
+auto-merges.
+
+**B. Local Ollama (free, your GPU)**
+
+If you'd rather run a small local model on root2:
 
 ```
 export OLLAMA_HOST=http://192.168.30.4:11434
-export OLLAMA_MODEL=qwen2.5-coder:32b
+export OLLAMA_MODEL=qwen2.5-coder:7b
 python -m agent.main --task ollama_improvements
 ```
 
-Without `OLLAMA_HOST` set the LLM tasks are skipped silently — no failure,
-no cost.
+Both paths coexist — Claude is tried first when available, Ollama is the
+fallback. With neither installed, both tasks return "skipped" and the
+deterministic tasks (sync, canary, announce, …) run normally.
+
+### Where each task runs
+
+| Task | Local (rootpc) | GH Actions |
+|---|---|---|
+| sync_datasets       | ✓ | ✓ |
+| canary_probe        | ✓ | ✓ |
+| changelog_update    | ✓ | ✓ |
+| telegram_announce   | ✓ | ✓ |
+| badge_update        | ✓ | ✓ |
+| issue_triage        | ✓ | ✓ (requires GH_TOKEN, already wired) |
+| **claude_improvements** | **✓** | ✗ — OAuth token shouldn't leave your host |
+| ollama_improvements | ✓ | ✗ — Ollama runs on your GPU, not CI |
+
+The GitHub workflow runs the deterministic 6 daily; the local Scheduled Task
+runs all 8 including the LLM-driven proposal. You decide which machine pays
+the LLM cost (your subscription quota / your electricity).
 
 ## Daily workflow
 
