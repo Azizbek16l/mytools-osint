@@ -152,6 +152,45 @@ After setup: `osint +<E.164 number>` does a real Telegram phone→username resol
 
 Optional paid keys plug into the same modules: HIBP, Numverify, IPinfo, LeakCheck. Set them with `osint config set HIBP_API_KEY xxx` — they extend coverage but are never required.
 
+## MCP server — use mytools-osint from Claude Code / Warp / Cursor
+
+`mytools-osint` ships as a **Model Context Protocol** server so AI assistants
+can call its OSINT tools directly. Once the server is wired into your AI
+client's config, the assistant gets the following tools — `lookup_username`,
+`lookup_email`, `lookup_phone`, `lookup_whatsapp`, `lookup_domain`,
+`lookup_ip`, plus `list_modules` and `list_sites_stats` for inventory.
+`lookup_telegram` is registered automatically iff a Telegram MTProto
+session is configured (`osint config telegram`). Three resources are
+exposed (`osint://history`, `osint://history/{id}`, `osint://sites`)
+along with two pre-canned investigation prompts (`digital_footprint_audit`
+and `domain_security_check`).
+
+```bash
+osint mcp                       # launches the stdio MCP server
+```
+
+Wire into Claude Code by adding this to `~/.claude/mcp.json` (example file
+shipped at `agent/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "mytools-osint": {
+      "command": "osint",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Code; the assistant can now call the tools directly. Same
+config shape works for Warp Agents and Cursor.
+
+**Why this matters (2026 standard):** embedding an LLM chat bar inside the
+CLI competes with Copilot CLI, Warp AI and Claude Code itself. Exposing the
+tool **as** an MCP server is the inversion that wins — agents come to you,
+the user never has to leave their chat.
+
 ## Architecture
 
 Single-process Python. The `Runner` registers every module against the `QueryKind`s it handles. Each query fans out to the matching producers concurrently under a single asyncio semaphore (default 40). Each module **streams** `Hit`s as they arrive — the GUI/CLI shows positives the moment they land.

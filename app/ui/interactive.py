@@ -119,6 +119,56 @@ def _print_keybindings(*pairs: tuple[str, str]) -> None:
     console.print(t)
 
 
+# ---- Global ? help overlay ------------------------------------------------
+
+_HELP_SCREENS: dict[str, list[tuple[str, str]]] = {
+    "main": [
+        ("L", "new lookup — single-prompt with auto-detect"),
+        ("H", "recent history (last 50)"),
+        ("M", "modules — k9s-style table + toggle"),
+        ("S", "sites — Sherlock + WhatsMyName breakdown"),
+        ("T", "settings — API keys · Telegram · paths"),
+        ("Q", "exit"),
+    ],
+    "results": [
+        ("1-9", "open positive #N directly"),
+        ("O", "open positive in browser (picker)"),
+        ("E", "export — csv · json · markdown"),
+        ("R", "re-run (same query, fresh probes)"),
+        ("N", "new lookup"),
+        ("M", "main menu"),
+        ("Q", "quit"),
+    ],
+    "modules": [
+        ("↵", "toggle enable/disable of highlighted module"),
+        ("↑↓", "navigate"),
+        ("←", "back to main menu"),
+    ],
+    "streaming": [
+        ("Ctrl+C", "cancel the in-flight run"),
+    ],
+}
+
+
+async def show_help(screen: str = "main") -> None:
+    """Show a `?`-style cheatsheet overlay for the current screen.
+
+    Used by binding `?` on every menu where it's offered. Renders a rich
+    Group with a section per topic.
+    """
+    bindings = _HELP_SCREENS.get(screen) or _HELP_SCREENS["main"]
+    rows = Text("\n")
+    rows.append(f"   {tokens.ICON_QUESTION}  help — {screen}\n",
+                style=f"bold {tokens.ACCENT}")
+    rows.append("   " + ("─" * 60) + "\n", style=tokens.DIM)
+    for key, label in bindings:
+        rows.append(f"   {key:<8}", style=f"bold {tokens.ACCENT}")
+        rows.append(f"  {label}\n", style=tokens.FG)
+    rows.append("   " + ("─" * 60) + "\n", style=tokens.DIM)
+    rows.append("   Esc / ← always returns one level up\n", style=tokens.DIM)
+    console.print(rows)
+
+
 # ---- live streaming layout --------------------------------------------------
 
 def _status_marker(status: HitStatus) -> Text:
