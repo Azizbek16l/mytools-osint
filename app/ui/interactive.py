@@ -698,15 +698,33 @@ def _render_summary_card(query: Query, hits: list[Hit], elapsed_ms: int) -> Grou
 
 # ---- menu actions -----------------------------------------------------------
 
-async def action_lookup(db: Database) -> bool:
+async def action_lookup(db: Database, *, kind_override: QueryKind | None = None) -> bool:
     """Single-prompt input with **live kind inference** in the bottom toolbar.
 
-    Uses prompt_toolkit (already a transitive dep via questionary) so that as
-    the user types `torv...` the toolbar updates to `[USERNAME · 6 modules]`.
-    The user can commit with Enter or escape with Ctrl-C.
+    Beyond the live toolbar (kept verbatim from the original), the prompt now
+    offers Claude Code-class ergonomics:
+
+    * fish-shell ghost-text auto-suggestions from a persistent ``FileHistory``
+    * Tab completion across slash commands, the seven kinds, and recent history
+    * Ctrl-R reverse history search (native prompt_toolkit)
+    * inline ``/help`` ``/clear`` ``/history`` … slash command dispatcher
+    * comma- or Alt+Enter-separated multi-target burst input
+
+    ``kind_override`` short-circuits auto-detection for a single submission and
+    is set by the ``/kind <k>`` slash command.
     """
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
     from prompt_toolkit.formatted_text import FormattedText
+
+    from app.ui.lookup_input import (
+        build_completer,
+        build_history,
+        build_key_bindings,
+        dispatch_slash,
+        split_multi_target,
+        suggest_slash_for_typo,
+    )
 
     console.print()
     hint = Text("   ")
@@ -718,17 +736,35 @@ async def action_lookup(db: Database) -> bool:
         examples.append(e, style=tokens.ACCENT)
         examples.append("   ", style=tokens.DIM)
     console.print(examples)
+    tips = Text("   ")
+    tips.append("tab", style=f"bold {tokens.ACCENT}")
+    tips.append(" complete  ·  ", style=tokens.DIM)
+    tips.append("→", style=f"bold {tokens.ACCENT}")
+    tips.append(" accept ghost text  ·  ", style=tokens.DIM)
+    tips.append("Ctrl-R", style=f"bold {tokens.ACCENT}")
+    tips.append(" search history  ·  ", style=tokens.DIM)
+    tips.append("/help", style=f"bold {tokens.ACCENT}")
+    tips.append(" for commands", style=tokens.DIM)
+    console.print(tips)
     console.print()
 
     r = runner()
+    history = build_history()
 
+    # PromptSession bottom_toolbar — keep identical to the pre-existing
+    # implementation so live kind inference and brand colours don't drift.
     def _toolbar_for(buf_text: str) -> FormattedText:
         v = (buf_text or "").strip()
         if not v:
             return FormattedText([
                 ("fg:#6e7681", "  start typing — kind is inferred live"),
             ])
-        kind = _auto_kind(v)
+        if v.startswith("/"):
+            return FormattedText([
+                ("fg:#58a6ff bold", "  /command"),
+                ("fg:#6e7681", " — Tab to complete, Enter to run"),
+            ])
+        kind = kind_override or _auto_kind(v)
         if kind is None:
             return FormattedText([
                 ("fg:#d29922", "  AMBIGUOUS"),
@@ -750,17 +786,91 @@ async def action_lookup(db: Database) -> bool:
         message=FormattedText([("fg:#58a6ff bold", "❯ ")]),
         bottom_toolbar=lambda: _toolbar_for(session.default_buffer.text),
         refresh_interval=0.15,
+        history=history,
+        auto_suggest=AutoSuggestFromHistory(),
+        completer=build_completer(history),
+        complete_while_typing=False,   # Tab-only — don't fight the ghost suggestion
+        enable_history_search=True,    # binds Ctrl-R natively
+        key_bindings=build_key_bindings(),
+        multiline=False,
     )
     try:
         value = await session.prompt_async()
     except (KeyboardInterrupt, EOFError):
         return True
-    if not value:
+    if value is None:
         return True
     value = value.strip()
-    kind = _auto_kind(value)
+    if not value:
+        return True
+
+    # ---- Slash command branch -------------------------------------------- #
+    if value.startswith("/"):
+        action = dispatch_slash(value)
+        if action.action == "quit":
+            return False
+        if action.action == "help":
+            await show_help("main")
+            return await action_lookup(db)
+        if action.action == "clear":
+            console.clear()
+            return await action_lookup(db)
+        if action.action == "history":
+            await action_history(db)
+            return await action_lookup(db)
+        if action.action == "modules":
+            await action_modules()
+            return await action_lookup(db)
+        if action.action == "sites":
+            await action_stats()
+            return await action_lookup(db)
+        if action.action == "settings":
+            from app.ui.config_cli import cmd_wizard
+            try:
+                cmd_wizard()
+            except Exception as e:
+                console.print(f"[{tokens.BAD}]settings wizard error:[/] {e}")
+            return await action_lookup(db)
+        if action.action == "version":
+            from app import __version__ as _ver
+            console.print(
+                f"   [bold {tokens.ACCENT}]mytools-osint[/] "
+                f"[{tokens.FG}]v{_ver}[/] [{tokens.DIM}]· by Bluetm.uz[/]",
+            )
+            return await action_lookup(db)
+        if action.action == "kind":
+            try:
+                kind = QueryKind(action.arg.lower()) if action.arg else None
+            except ValueError:
+                kind = None
+            if kind is None:
+                console.print(
+                    f"[{tokens.WARN}]usage:[/] /kind <"
+                    + "|".join(k.value for k in QueryKind)
+                    + ">",
+                )
+                return await action_lookup(db)
+            return await action_lookup(db, kind_override=kind)
+        # unknown — print the dispatcher's did-you-mean hint and loop
+        if action.message:
+            console.print(f"[{tokens.WARN}]{action.message}[/]")
+        return await action_lookup(db)
+
+    # ---- Multi-target burst input ---------------------------------------- #
+    targets = split_multi_target(value)
+    if len(targets) > 1:
+        return await _run_multi_target(db, targets, kind_override=kind_override)
+
+    # ---- Single-target path ---------------------------------------------- #
+    kind = kind_override or _auto_kind(value)
     if kind is None:
-        # Ambiguous — short disambiguator
+        # Non-slash typo that looks like a slash command? Offer a hint first.
+        hinted = suggest_slash_for_typo(value)
+        if hinted:
+            console.print(
+                f"[{tokens.WARN}]no kind inferred[/] — did you mean "
+                f"[{tokens.ACCENT}]{hinted}[/]?",
+            )
         kind = await questionary.select(
             "could not infer kind — pick one:",
             choices=[Choice(label, value=k) for k, label in KIND_LABELS.items()] +
@@ -772,6 +882,73 @@ async def action_lookup(db: Database) -> bool:
     query = Query(kind=kind, value=value)
     hits, elapsed_ms = await run_query(db, query)
     return await after_results_menu(db, query, hits, elapsed_ms)
+
+
+async def _run_multi_target(
+    db: Database, targets: list[str], *, kind_override: QueryKind | None = None,
+) -> bool:
+    """Run one query per target sequentially, then print one combined summary.
+
+    Each target gets its own full streaming dashboard via :func:`run_query`;
+    after all of them complete we render a small recap table so the user can
+    see at a glance which targets yielded the most positives.
+    """
+    console.print()
+    header = Text("   ")
+    header.append("burst input", style=f"bold {tokens.ACCENT}")
+    header.append(f"   {len(targets)} targets — running sequentially", style=tokens.DIM)
+    console.print(header)
+    console.print()
+
+    recap: list[tuple[str, str, int, int, int]] = []  # value, kind, found, total, ms
+    for idx, target in enumerate(targets, start=1):
+        kind = kind_override or _auto_kind(target)
+        if kind is None:
+            console.print(
+                f"[{tokens.WARN}]skipping[/] [{tokens.FG}]{target}[/] "
+                f"[{tokens.DIM}](no kind inferred — pass /kind first)[/]",
+            )
+            recap.append((target, "—", 0, 0, 0))
+            continue
+        line = Text("   ")
+        line.append(f"[{idx}/{len(targets)}] ", style=tokens.DIM)
+        line.append(target, style=f"bold {tokens.FG}")
+        line.append(f"   ({kind.value})", style=tokens.DIM)
+        console.print(line)
+        query = Query(kind=kind, value=target)
+        hits, elapsed_ms = await run_query(db, query)
+        found = sum(1 for h in hits if h.status == HitStatus.FOUND)
+        recap.append((target, kind.value, found, len(hits), elapsed_ms))
+
+    # Combined summary table.
+    t = Table.grid(padding=(0, 2))
+    t.add_column(width=4, justify="right")
+    t.add_column(width=30, overflow="ellipsis", no_wrap=True)
+    t.add_column(width=10)
+    t.add_column(width=10, justify="right")
+    t.add_column(width=10, justify="right")
+    t.add_column(width=10, justify="right")
+    t.add_row(
+        Text("#",     style=f"bold {tokens.ACCENT}"),
+        Text("TARGET", style=f"bold {tokens.ACCENT}"),
+        Text("KIND",   style=f"bold {tokens.ACCENT}"),
+        Text("FOUND",  style=f"bold {tokens.ACCENT}"),
+        Text("TOTAL",  style=f"bold {tokens.ACCENT}"),
+        Text("MS",     style=f"bold {tokens.ACCENT}"),
+    )
+    for i, (val, knd, found, total, ms) in enumerate(recap, start=1):
+        t.add_row(
+            Text(str(i), style=tokens.DIM),
+            Text(val, style=tokens.FG),
+            Text(knd, style=tokens.DIM),
+            Text(str(found), style=f"bold {tokens.OK}" if found else tokens.DIM),
+            Text(str(total), style=tokens.FG),
+            Text(str(ms), style=tokens.DIM),
+        )
+    console.print()
+    console.print(t)
+    console.print()
+    return True
 
 
 async def after_results_menu(db: Database, query: Query, hits: list[Hit],
