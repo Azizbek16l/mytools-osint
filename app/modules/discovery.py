@@ -113,6 +113,54 @@ async def _github_search(value: str, kind: QueryKind) -> AsyncIterator[Hit]:
                   status=HitStatus.ERROR, detail=str(e))
 
 
+async def _gitlab_user(username: str) -> AsyncIterator[Hit]:
+    """GitLab.com public user lookup. Mirrors the GitHub user probe.
+
+    `https://gitlab.com/api/v4/users?username=<u>` returns 0 or 1 user matching
+    that exact handle (case-insensitive). No auth needed, no key.
+    """
+    url = "https://gitlab.com/api/v4/users"
+    try:
+        client = await get_client()
+        r = await client.get(
+            url, params={"username": username},
+            headers={"Accept": "application/json", "User-Agent": "mytools-osint"},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            users = r.json() or []
+            if not users:
+                yield Hit(module=NAME, source="GitLab:user", category="profile",
+                          status=HitStatus.NOT_FOUND,
+                          detail="no public user with that handle")
+                return
+            u = users[0]
+            yield Hit(
+                module=NAME, source="GitLab:user", category="profile",
+                status=HitStatus.FOUND,
+                title=u.get("name") or u.get("username") or username,
+                detail=(
+                    f"id={u.get('id')} state={u.get('state','?')} "
+                    f"created={u.get('created_at','?')[:10]} "
+                    f"loc={u.get('location') or '-'} "
+                    f"org={u.get('organization') or '-'} "
+                    f"bio={(u.get('bio') or '')[:60]}"
+                ),
+                url=u.get("web_url") or f"https://gitlab.com/{username}",
+                severity=Severity.HIGH,
+                extra=u,
+            )
+        elif r.status_code in (429, 403):
+            yield Hit(module=NAME, source="GitLab:user", category="profile",
+                      status=HitStatus.RATELIMITED, detail=f"HTTP {r.status_code}")
+        else:
+            yield Hit(module=NAME, source="GitLab:user", category="profile",
+                      status=HitStatus.UNCERTAIN, detail=f"HTTP {r.status_code}")
+    except Exception as e:
+        yield Hit(module=NAME, source="GitLab:user", category="profile",
+                  status=HitStatus.ERROR, detail=str(e))
+
+
 async def _github_user(username: str) -> AsyncIterator[Hit]:
     """GitHub user lookup — public-no-key endpoint, very useful profile detail."""
     url = f"https://api.github.com/users/{urllib.parse.quote(username)}"
@@ -209,8 +257,11 @@ async def run(query: Query) -> AsyncIterator[Hit]:
         async for h in _github_search(value, query.kind):
             yield h
     if query.kind == QueryKind.USERNAME:
-        # also fetch the GitHub user profile if the username matches a GH login
-        async for h in _github_user(value.lstrip("@")):
+        # also fetch the GitHub / GitLab user profile if the username matches
+        handle = value.lstrip("@")
+        async for h in _github_user(handle):
+            yield h
+        async for h in _gitlab_user(handle):
             yield h
 
 

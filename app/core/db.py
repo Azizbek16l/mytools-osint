@@ -9,51 +9,92 @@ import aiosqlite
 
 from .types import Hit, Query, QueryResult
 
-_SCHEMA = """
+_PRAGMAS = """
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
 PRAGMA foreign_keys=ON;
-
-CREATE TABLE IF NOT EXISTS queries (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind        TEXT NOT NULL,
-    value       TEXT NOT NULL,
-    note        TEXT NOT NULL DEFAULT '',
-    started_at  TEXT NOT NULL,
-    finished_at TEXT,
-    duration_ms INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_queries_value ON queries(kind, value);
-CREATE INDEX IF NOT EXISTS idx_queries_started ON queries(started_at DESC);
-
-CREATE TABLE IF NOT EXISTS hits (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    query_id   INTEGER NOT NULL REFERENCES queries(id) ON DELETE CASCADE,
-    module     TEXT NOT NULL,
-    source     TEXT NOT NULL,
-    category   TEXT NOT NULL DEFAULT '',
-    status     TEXT NOT NULL,
-    title      TEXT NOT NULL DEFAULT '',
-    url        TEXT NOT NULL DEFAULT '',
-    detail     TEXT NOT NULL DEFAULT '',
-    extra_json TEXT NOT NULL DEFAULT '{}',
-    severity   TEXT NOT NULL DEFAULT 'info',
-    found_at   TEXT NOT NULL,
-    latency_ms INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_hits_query ON hits(query_id);
-CREATE INDEX IF NOT EXISTS idx_hits_status ON hits(status);
-
-CREATE TABLE IF NOT EXISTS http_cache (
-    key        TEXT PRIMARY KEY,        -- module + url + payload digest
-    status     INTEGER NOT NULL,
-    body       BLOB,
-    headers    TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    expires_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_http_cache_expires ON http_cache(expires_at);
 """
+
+# Each migration MUST be idempotent on its own (CREATE TABLE IF NOT EXISTS,
+# CREATE INDEX IF NOT EXISTS). We track applied versions in `schema_version`
+# so future ALTER-style migrations only run once. Re-running connect() on
+# either a fresh or already-populated DB must succeed.
+_MIGRATIONS: list[tuple[int, str]] = [
+    (
+        1,
+        """
+        CREATE TABLE IF NOT EXISTS queries (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind        TEXT NOT NULL,
+            value       TEXT NOT NULL,
+            note        TEXT NOT NULL DEFAULT '',
+            started_at  TEXT NOT NULL,
+            finished_at TEXT,
+            duration_ms INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_queries_value ON queries(kind, value);
+        CREATE INDEX IF NOT EXISTS idx_queries_started ON queries(started_at DESC);
+
+        CREATE TABLE IF NOT EXISTS hits (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            query_id   INTEGER NOT NULL REFERENCES queries(id) ON DELETE CASCADE,
+            module     TEXT NOT NULL,
+            source     TEXT NOT NULL,
+            category   TEXT NOT NULL DEFAULT '',
+            status     TEXT NOT NULL,
+            title      TEXT NOT NULL DEFAULT '',
+            url        TEXT NOT NULL DEFAULT '',
+            detail     TEXT NOT NULL DEFAULT '',
+            extra_json TEXT NOT NULL DEFAULT '{}',
+            severity   TEXT NOT NULL DEFAULT 'info',
+            found_at   TEXT NOT NULL,
+            latency_ms INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_hits_query ON hits(query_id);
+        CREATE INDEX IF NOT EXISTS idx_hits_status ON hits(status);
+
+        CREATE TABLE IF NOT EXISTS http_cache (
+            key        TEXT PRIMARY KEY,
+            status     INTEGER NOT NULL,
+            body       BLOB,
+            headers    TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            expires_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_http_cache_expires ON http_cache(expires_at);
+        """,
+    ),
+    (
+        2,
+        """
+        CREATE TABLE IF NOT EXISTS watchlist (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind          TEXT NOT NULL,
+            value         TEXT NOT NULL,
+            label         TEXT,
+            interval_h    INTEGER NOT NULL DEFAULT 24,
+            enabled       INTEGER NOT NULL DEFAULT 1,
+            created_at    TEXT NOT NULL,
+            last_run_at   TEXT,
+            last_query_id INTEGER,
+            UNIQUE(kind, value)
+        );
+        CREATE INDEX IF NOT EXISTS idx_watchlist_due ON watchlist(enabled, last_run_at);
+
+        CREATE TABLE IF NOT EXISTS notifications (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            watchlist_id  INTEGER NOT NULL REFERENCES watchlist(id) ON DELETE CASCADE,
+            query_id      INTEGER NOT NULL,
+            new_hits_json TEXT NOT NULL,
+            sent_at       TEXT,
+            channel       TEXT NOT NULL,
+            status        TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_notifications_watch ON notifications(watchlist_id);
+        CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
+        """,
+    ),
+]
 
 
 class Database:
@@ -68,7 +109,32 @@ class Database:
             return
         self._conn = await aiosqlite.connect(self.path)
         self._conn.row_factory = aiosqlite.Row
-        await self._conn.executescript(_SCHEMA)
+        await self._conn.executescript(_PRAGMAS)
+        await self.migrate()
+
+    async def migrate(self) -> None:
+        """Apply pending schema migrations. Idempotent — safe to call twice.
+
+        Tracks applied versions in `schema_version(version PK)`. Each migration
+        in _MIGRATIONS uses CREATE ... IF NOT EXISTS, so reapplying is a no-op
+        even if the version table is wiped.
+        """
+        assert self._conn is not None, "Database not connected"
+        await self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_version ("
+            "version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+        )
+        async with self._conn.execute("SELECT version FROM schema_version") as cur:
+            applied = {row["version"] for row in await cur.fetchall()}
+        for version, ddl in _MIGRATIONS:
+            if version in applied:
+                continue
+            await self._conn.executescript(ddl)
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO schema_version (version, applied_at) "
+                "VALUES (?, datetime('now'))",
+                (version,),
+            )
         await self._conn.commit()
 
     async def close(self) -> None:
@@ -185,6 +251,114 @@ class Database:
         await self._exec("DELETE FROM queries WHERE id = ?", (query_id,))
         assert self._conn is not None
         await self._conn.commit()
+
+    async def find_queries_for_value(
+        self, kind: str, value: str, limit: int = 10
+    ) -> list[int]:
+        """Most recent query IDs for this (kind, value), newest first."""
+        assert self._conn is not None
+        async with self._conn.execute(
+            """SELECT id FROM queries
+               WHERE kind = ? AND value = ?
+               ORDER BY started_at DESC
+               LIMIT ?""",
+            (kind, value, limit),
+        ) as cur:
+            return [row["id"] for row in await cur.fetchall()]
+
+    # ---- watchlist (row-level helpers; high-level API lives in app.features.watchlist) ----
+
+    async def watchlist_insert(
+        self,
+        kind: str,
+        value: str,
+        label: str | None,
+        interval_h: int,
+        created_at: str,
+    ) -> int:
+        """Insert a watchlist row. Raises sqlite3.IntegrityError on UNIQUE conflict."""
+        assert self._conn is not None
+        cur = await self._exec(
+            """INSERT INTO watchlist (kind, value, label, interval_h, enabled, created_at)
+               VALUES (?, ?, ?, ?, 1, ?)""",
+            (kind, value, label, interval_h, created_at),
+        )
+        await self._conn.commit()
+        return cur.lastrowid or 0
+
+    async def watchlist_get(self, id_: int) -> dict[str, Any] | None:
+        assert self._conn is not None
+        async with self._conn.execute(
+            "SELECT * FROM watchlist WHERE id = ?", (id_,)
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def watchlist_get_by_label(self, label: str) -> dict[str, Any] | None:
+        assert self._conn is not None
+        async with self._conn.execute(
+            "SELECT * FROM watchlist WHERE label = ?", (label,)
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def watchlist_list(self) -> list[dict[str, Any]]:
+        assert self._conn is not None
+        async with self._conn.execute(
+            "SELECT * FROM watchlist ORDER BY id"
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def watchlist_delete(self, id_: int) -> bool:
+        assert self._conn is not None
+        cur = await self._exec("DELETE FROM watchlist WHERE id = ?", (id_,))
+        await self._conn.commit()
+        return (cur.rowcount or 0) > 0
+
+    async def watchlist_set_enabled(self, id_: int, enabled: bool) -> None:
+        assert self._conn is not None
+        await self._exec(
+            "UPDATE watchlist SET enabled = ? WHERE id = ?",
+            (1 if enabled else 0, id_),
+        )
+        await self._conn.commit()
+
+    async def watchlist_mark_run(
+        self, id_: int, query_id: int, last_run_at: str
+    ) -> None:
+        assert self._conn is not None
+        await self._exec(
+            "UPDATE watchlist SET last_run_at = ?, last_query_id = ? WHERE id = ?",
+            (last_run_at, query_id, id_),
+        )
+        await self._conn.commit()
+
+    async def notifications_insert(
+        self,
+        watchlist_id: int,
+        query_id: int,
+        new_hits_json: str,
+        channel: str,
+        status: str,
+        sent_at: str | None = None,
+    ) -> int:
+        assert self._conn is not None
+        cur = await self._exec(
+            """INSERT INTO notifications
+               (watchlist_id, query_id, new_hits_json, channel, status, sent_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (watchlist_id, query_id, new_hits_json, channel, status, sent_at),
+        )
+        await self._conn.commit()
+        return cur.lastrowid or 0
+
+    async def notifications_for(self, watchlist_id: int) -> list[dict[str, Any]]:
+        assert self._conn is not None
+        async with self._conn.execute(
+            "SELECT * FROM notifications WHERE watchlist_id = ? ORDER BY id DESC",
+            (watchlist_id,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
 
     # ---- http cache ----
 

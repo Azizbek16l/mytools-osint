@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -13,8 +13,6 @@ from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
 from app.ui.interactive import (
     ModProgress,
     _render_domain_report,
-    _render_hits_feed,
-    _render_modules_rail,
     _render_streaming_layout,
     _render_summary_card,
 )
@@ -23,7 +21,7 @@ console = Console(force_terminal=True, width=120)
 
 
 def mock_hits() -> list[Hit]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     base = [
         ("username", "GitHub", "tech", "torvalds — Linus Torvalds",
          "https://github.com/torvalds", HitStatus.FOUND, Severity.HIGH),

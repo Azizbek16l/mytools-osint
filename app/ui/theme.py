@@ -1,5 +1,21 @@
-"""Dark theme stylesheet. Single source of truth for colours."""
+"""Dark theme stylesheet. Single source of truth for colours.
+
+Also re-exports the CLI ``tokens`` module so ``from app.ui.theme import tokens``
+resolves to the same object as ``from app.ui import tokens``. The CLI theme
+contract (adaptive light/dark via ``BLUETM_THEME``) lives in :mod:`app.ui.tokens`;
+this module owns the Qt stylesheet for the desktop UI.
+"""
 from __future__ import annotations
+
+from app.ui import tokens
+
+__all__ = (
+    "BG", "BG_ELEVATED", "BG_HOVER", "BORDER",
+    "TEXT", "TEXT_DIM", "TEXT_BRIGHT",
+    "ACCENT", "ACCENT_FG", "OK", "WARN", "BAD", "INFO",
+    "SEV_HIGH", "SEV_MED", "SEV_LOW",
+    "STYLE", "apply", "tokens",
+)
 
 # Palette — neutral dark with a single accent
 BG          = "#0e1117"

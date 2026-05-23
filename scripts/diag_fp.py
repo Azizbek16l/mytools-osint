@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.modules.base import probe_site
 from app.modules.username import load_sites
 
-
 SUSPECTS = (
     "ArtBreeder", "Duolingo", "Bio Sites", "Destructoid", "MAGABOOK",
     "secure_donation", "Wireclub", "game_debate", "Steam Group", "Telegram (web)",

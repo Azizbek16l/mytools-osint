@@ -14,6 +14,7 @@ Design (per senior UX + designer review, 2026-05):
 from __future__ import annotations
 
 import asyncio
+import difflib
 import ipaddress
 import json
 import re
@@ -38,6 +39,7 @@ from app.core.runner import runner
 from app.core.types import Hit, HitStatus, Query, QueryKind
 from app.ui import tokens
 from app.ui.banner import BRAND
+from app.ui.health import record_module_run
 
 console = Console(highlight=False, force_terminal=tokens.colour_enabled() or None)
 
@@ -258,11 +260,29 @@ def _classify(hit: Hit) -> str:
 
 @dataclass
 class ModProgress:
+    """Per-module live counters used by the streaming dashboard.
+
+    ``state`` lifecycle:
+      idle      → no hit observed yet
+      running   → at least one hit observed
+      done      → producer task completed cleanly
+      errored   → producer task raised
+      ratelimited → producer emitted only RATELIMITED status before finishing
+
+    The derived states (errored / ratelimited) are tagged by the
+    ``done`` callback in :func:`run_query`, which inspects hits-by-module
+    at the moment the task finishes.
+    """
+
     name: str
-    state: str = "idle"     # idle | running | done
+    state: str = "idle"
     hits: int = 0           # any Hit kind
     positives: int = 0      # only FOUND
+    errors: int = 0
+    ratelimited: int = 0
     last_ts: float = 0.0
+    # Populated by run_query when the module's task wrapper finishes.
+    finished: bool = False
 
 
 def _update_module_progress(progress: dict[str, ModProgress], hit: Hit,
@@ -271,20 +291,44 @@ def _update_module_progress(progress: dict[str, ModProgress], hit: Hit,
     p.hits += 1
     if hit.status == HitStatus.FOUND:
         p.positives += 1
+    elif hit.status == HitStatus.ERROR:
+        p.errors += 1
+    elif hit.status == HitStatus.RATELIMITED:
+        p.ratelimited += 1
     p.last_ts = now
-    p.state = "running"
+    if not p.finished:
+        p.state = "running"
 
 
-def _render_header(query: Query, done: bool, elapsed_ms: int) -> Text:
-    """Single-line header — kind · value · spinner/done."""
+def _render_header(query: Query, done: bool, elapsed_ms: int,
+                   n_modules: int = 0) -> Text:
+    """Single-line header — Claude Code-style "tool indicator" with elapsed.
+
+    Format::
+
+        ● Scanning   torvalds          [USERNAME] · 6 modules · 18s elapsed
+
+    On completion the spinner switches to ``ICON_OK`` and the label flips to
+    ``Scanned``. The elapsed-time formatter keeps the digit count steady
+    (``Xs`` up to 60s, then ``Xm Ys``) so the line doesn't reflow as the
+    counter advances.
+    """
     spin = _spin_char() if not done else tokens.ICON_OK
+    label = "Scanned" if done else "Scanning"
+    secs = elapsed_ms // 1000
+    if secs < 60:
+        elapsed = f"{secs}s"
+    else:
+        elapsed = f"{secs // 60}m {secs % 60}s"
     t = Text()
-    t.append(f"  {spin}  ", style=f"bold {tokens.ACCENT}")
-    t.append(query.kind.value, style=tokens.DIM)
-    t.append("  ")
+    t.append(f"  {spin} ", style=f"bold {tokens.ACCENT if not done else tokens.OK}")
+    t.append(label, style=f"bold {tokens.FG}")
+    t.append("   ")
     t.append(query.value, style="bold")
-    if done:
-        t.append(f"   done in {elapsed_ms} ms", style=tokens.OK)
+    t.append("   ")
+    t.append(f"[{query.kind.value.upper()}]", style=f"bold {tokens.ACCENT}")
+    t.append(f" · {n_modules} modules", style=tokens.DIM)
+    t.append(f" · {elapsed} elapsed", style=tokens.DIM)
     return t
 
 
@@ -343,34 +387,68 @@ def _render_footer(query: Query, hits: list[Hit], elapsed_ms: int, done: bool) -
 
 def _render_modules_rail(progress: dict[str, ModProgress], done: bool) -> Group:
     """Left rail — per-module status + counters. gh-style: no Panel chrome,
-    just a bold-dim title and a separator rule above the table."""
+    just a bold-dim title and a separator rule above the table.
+
+    Status mapping (Sprint 3 polish):
+      ●  running       — accent, spinner
+      ✓  done          — ok
+      ⚠  ratelimited   — warn (any RATELIMITED hits, finished)
+      ✗  errored       — bad (any ERROR hits, finished)
+      ○  idle          — dim (no hits yet)
+    """
     t = Table.grid(padding=(0, 1))
     t.add_column(width=2, no_wrap=True)
     t.add_column(width=14)
-    t.add_column(justify="right", width=5)
+    t.add_column(width=14, no_wrap=True)
+    t.add_column(justify="right", width=6)
     if not progress:
-        t.add_row("", Text("waiting for modules…", style=tokens.DIM), "")
+        t.add_row("", Text("waiting for modules…", style=tokens.DIM), "", "")
     for name in sorted(progress):
         p = progress[name]
-        if done and p.state == "running":
-            p.state = "done"
+        # Reconcile rolled-up state from `finished` flag + counters.
+        if p.finished or done:
+            if p.state == "running" or p.state == "idle":
+                if p.errors and not p.positives:
+                    p.state = "errored"
+                elif p.ratelimited and not p.positives:
+                    p.state = "ratelimited"
+                else:
+                    p.state = "done"
+
         if p.state == "idle":
-            sym, colour = "○", tokens.DIM
+            sym, colour, status_label = "○", tokens.DIM, "idle"
         elif p.state == "running":
-            sym, colour = _spin_char(), tokens.ACCENT
+            sym, colour, status_label = _spin_char(), tokens.ACCENT, "running"
         elif p.state == "done":
-            sym, colour = tokens.ICON_OK, tokens.OK
+            sym, colour, status_label = tokens.ICON_OK, tokens.OK, "done"
+        elif p.state == "ratelimited":
+            sym, colour, status_label = tokens.ICON_WARN, tokens.WARN, "ratelimited"
+        elif p.state == "errored":
+            sym, colour, status_label = tokens.ICON_BAD, tokens.BAD, "errored"
         else:
-            sym, colour = tokens.ICON_SKIP, tokens.DIM
-        cnt = Text(f"{p.positives}", style=f"bold {tokens.OK}" if p.positives else tokens.DIM)
-        t.add_row(Text(sym, style=f"bold {colour}"),
-                  Text(name, style=tokens.FG), cnt)
+            sym, colour, status_label = tokens.ICON_SKIP, tokens.DIM, p.state
+
+        # Right-side badge: "<n> hits" colour-coded; status label dimmed.
+        hits_cell = Text(
+            f"{p.positives} hits",
+            style=f"bold {tokens.OK}" if p.positives else tokens.DIM,
+        )
+        status_cell = Text(status_label, style=colour)
+        t.add_row(
+            Text(sym, style=f"bold {colour}"),
+            Text(name, style=tokens.FG),
+            status_cell,
+            hits_cell,
+        )
     active = sum(1 for p in progress.values() if p.state == "running")
-    done_cnt = sum(1 for p in progress.values() if p.state == "done")
+    done_cnt = sum(
+        1 for p in progress.values()
+        if p.state in ("done", "errored", "ratelimited")
+    )
     header = Text()
     header.append("modules", style=f"bold {tokens.FG}")
     header.append(f"   {active} active · {done_cnt} done", style=tokens.DIM)
-    return Group(header, Text("─" * 26, style=tokens.DIM), t)
+    return Group(header, Text("─" * 40, style=tokens.DIM), t)
 
 
 def _render_hits_feed(hits: list[Hit]) -> Group:
@@ -438,9 +516,9 @@ def _render_streaming_layout(
         Layout(name="body"),
         Layout(name="footer", size=2),
     )
-    root["header"].update(_render_header(query, done, elapsed_ms))
+    root["header"].update(_render_header(query, done, elapsed_ms, len(progress)))
     root["body"].split_row(
-        Layout(name="rail", size=28),
+        Layout(name="rail", size=42),
         Layout(name="feed"),
     )
     root["body"]["rail"].update(_render_modules_rail(progress, done))
@@ -457,11 +535,16 @@ async def run_query(db: Database, query: Query) -> tuple[list[Hit], int]:
     Windows Terminal when Rich redraws panel borders 12 times per second.
     Refresh is throttled to 6 Hz; on exit we transition back to the main screen
     and print a static snapshot so the result remains visible in scrollback.
+
+    Sprint 3 polish: after the run completes, each registered module emits a
+    health record (``ok | degraded | failed``) to ``app.ui.health`` so the
+    modules screen sparkline reflects real activity, not a placeholder.
     """
     r = runner()
     hits: list[Hit] = []
     progress: dict[str, ModProgress] = {}
-    for m in r.modules_for(query.kind):
+    routed = r.modules_for(query.kind)
+    for m in routed:
         progress[m.name] = ModProgress(name=m.name, state="idle")
     started = asyncio.get_event_loop().time()
 
@@ -502,7 +585,7 @@ async def run_query(db: Database, query: Query) -> tuple[list[Hit], int]:
             result = await task
             elapsed_ms = int((asyncio.get_event_loop().time() - started) * 1000)
             for p in progress.values():
-                p.state = "done"
+                p.finished = True
             live.update(_render_streaming_layout(
                 query, hits, progress, elapsed_ms, True,
             ))
@@ -514,7 +597,23 @@ async def run_query(db: Database, query: Query) -> tuple[list[Hit], int]:
     elapsed_ms = int((asyncio.get_event_loop().time() - started) * 1000)
     # After the alt-screen Live closes, the main screen is restored — print a
     # static snapshot of the dashboard so the result lives on in scrollback.
+    for p in progress.values():
+        p.finished = True
     console.print(_render_streaming_layout(query, hits, progress, elapsed_ms, True))
+
+    # Record per-module health entries — best-effort, never fatal.
+    for m in routed:
+        p = progress.get(m.name) or ModProgress(name=m.name)
+        if p.errors and not p.positives:
+            status = "failed"
+        elif p.ratelimited and not p.positives:
+            status = "degraded"
+        else:
+            status = "ok"
+        try:
+            record_module_run(m.name, status, p.positives)
+        except Exception:
+            pass
 
     if result is not None:
         try:
@@ -681,10 +780,19 @@ def _render_summary_card(query: Query, hits: list[Hit], elapsed_ms: int) -> Grou
         cat_table,
     ]
     if positives:
+        hint = Text("   top ", style=tokens.DIM)
+        hint.append(str(min(len(positives), 10)), style=f"bold {tokens.FG}")
+        hint.append(" positives  ", style=tokens.DIM)
+        # k9s-style per-hit hint — single-key actions on a numbered row.
+        hint.append("[N]", style=f"bold {tokens.ACCENT}")
+        hint.append(" open  ·  ", style=tokens.DIM)
+        hint.append("[c]", style=f"bold {tokens.ACCENT}")
+        hint.append(" copy  ·  ", style=tokens.DIM)
+        hint.append("[a]", style=f"bold {tokens.ACCENT}")
+        hint.append(" adjacent", style=tokens.DIM)
         parts += [
             Text(""),
-            Text(f"   top {min(len(positives), 10)} positives (use [N] to open)",
-                 style=tokens.DIM),
+            hint,
             Text(""),
             pos_table,
         ]
@@ -953,7 +1061,16 @@ async def _run_multi_target(
 
 async def after_results_menu(db: Database, query: Query, hits: list[Hit],
                               elapsed_ms: int) -> bool:
+    """Post-run menu with the design summary card, did-you-mean for zero hits,
+    and the k9s-style ``[N]/[c]/[a]`` per-hit action sub-menu (Sprint 3)."""
     positives = [h for h in hits if h.status == HitStatus.FOUND]
+
+    # Zero-positive empty-state — render did-you-mean BEFORE the summary card
+    # so the suggestion is the first thing the eye lands on.
+    suggestions = build_did_you_mean(query, hits) if not positives else []
+    if suggestions:
+        console.print(_render_did_you_mean(query, len(hits), suggestions))
+
     # Render the design summary card (categorised findings + sparkline)
     console.print(_render_summary_card(query, hits, elapsed_ms))
     # For domain queries, also render the 3-column condensed report
@@ -961,11 +1078,25 @@ async def after_results_menu(db: Database, query: Query, hits: list[Hit],
         console.print(_render_domain_report(query, hits))
 
     while True:
+        # Suggestion shortcut keys ``1/2/3`` are only attached when we have a
+        # did-you-mean block — otherwise the same digits are used to open a
+        # numbered positive via the per-hit branch.
+        sug_choices: list[Choice] = []
+        for i, (label, _sug_kind, _sug_val) in enumerate(suggestions, start=1):
+            sug_choices.append(Choice(
+                f"  try [{i}] — {label}", value=f"sug:{i - 1}",
+                shortcut_key=str(i),
+            ))
+
         choice = await questionary.select(
             "what next?",
             choices=[
+                *sug_choices,
                 Choice(f"  open positive in browser  ·  pick from {len(positives)} URLs",
                        value="open", shortcut_key="o",
+                       disabled=None if positives else "no positives"),
+                Choice("  per-hit actions  ·  open · copy · adjacent",
+                       value="per-hit", shortcut_key="p",
                        disabled=None if positives else "no positives"),
                 Choice("  export  ·  csv · json · md",
                        value="export", shortcut_key="e",
@@ -981,13 +1112,24 @@ async def after_results_menu(db: Database, query: Query, hits: list[Hit],
             use_shortcuts=True,
             instruction="(↑↓ or single key)",
         ).ask_async()
+        if isinstance(choice, str) and choice.startswith("sug:"):
+            idx = int(choice.split(":", 1)[1])
+            _label, sug_kind, sug_value = suggestions[idx]
+            new_query = Query(kind=sug_kind, value=sug_value)
+            hits, elapsed_ms = await run_query(db, new_query)
+            return await after_results_menu(db, new_query, hits, elapsed_ms)
         if choice == "open":
             await drill_open(positives)
+        elif choice == "per-hit":
+            await per_hit_actions(db, positives)
         elif choice == "export":
             await action_export(query, hits)
         elif choice == "rerun":
             hits, elapsed_ms = await run_query(db, query)
             positives = [h for h in hits if h.status == HitStatus.FOUND]
+            suggestions = build_did_you_mean(query, hits) if not positives else []
+            if suggestions:
+                console.print(_render_did_you_mean(query, len(hits), suggestions))
             console.print(_render_summary_card(query, hits, elapsed_ms))
         elif choice == "new":
             return await action_lookup(db)
@@ -1022,6 +1164,293 @@ async def drill_open(positives: list[Hit]) -> None:
             console.print(f"[{tokens.OK}]opened[/] {url}")
         except Exception as e:
             console.print(f"[{tokens.BAD}]failed:[/] {e}")
+
+
+# --------------------------------------------------------------------------- #
+# Per-hit actions — k9s-style single-key sub-menu (Sprint 3, item 2)
+# --------------------------------------------------------------------------- #
+
+def _copy_to_clipboard(text: str) -> tuple[bool, str]:
+    """Try to copy ``text`` to the OS clipboard via :mod:`pyperclip`.
+
+    Returns ``(True, msg)`` on success. On any failure (module missing, no
+    clipboard service on a headless box, OS mechanism refused) returns
+    ``(False, "<reason>")`` and the caller falls back to printing the value
+    so the user can select+copy manually. ``pyperclip`` is intentionally a
+    soft dependency — never added to ``requirements.txt``.
+    """
+    try:
+        import pyperclip  # type: ignore[import-not-found]
+    except ImportError:
+        return False, "pyperclip not installed"
+    try:
+        pyperclip.copy(text)
+        return True, "copied"
+    except Exception as e:  # pyperclip.PyperclipException, etc.
+        return False, f"{type(e).__name__}: {e}"
+
+
+async def per_hit_actions(db: Database, positives: list[Hit]) -> None:
+    """Drill into a numbered positive and offer ``o/c/a/b`` single-key actions.
+
+    Steps:
+      1. Prompt for the hit index (1..N).
+      2. Show a 4-row sub-menu — open, copy, adjacent, back.
+      3. Each action returns control to the result-list (caller loops).
+
+    Adjacency uses ``Hit.extra["suggested_kind"]`` + ``Hit.extra["suggested_value"]``
+    emitted by Agent A's adjacency module. Missing keys produce a friendly
+    "no suggestions" line rather than an error.
+    """
+    if not positives:
+        return
+    n = len(positives)
+    raw = await questionary.text(
+        f"pick a hit number to drill into [1-{n}]:",
+        style=QSTYLE,
+        instruction="(blank to cancel)",
+    ).ask_async()
+    if not raw:
+        return
+    try:
+        idx = int(raw.strip()) - 1
+    except ValueError:
+        console.print(f"[{tokens.WARN}]not a number — '{raw}'[/]")
+        return
+    if not (0 <= idx < n):
+        console.print(f"[{tokens.WARN}]out of range — pick 1..{n}[/]")
+        return
+
+    hit = positives[idx]
+    summary = Text("   ")
+    summary.append(f"[{idx + 1}]", style=f"bold {tokens.ACCENT}")
+    summary.append(f"  {hit.source[:24]:24}", style=f"bold {tokens.FG}")
+    summary.append("   ")
+    summary.append((hit.url or hit.detail)[:80], style=tokens.DIM)
+    console.print(summary)
+
+    choice = await questionary.select(
+        "action:",
+        choices=[
+            Choice("  o  open URL in browser", value="o", shortcut_key="o",
+                   disabled=None if hit.url else "no URL on this hit"),
+            Choice("  c  copy URL to clipboard", value="c", shortcut_key="c",
+                   disabled=None if hit.url else "no URL on this hit"),
+            Choice("  a  adjacent search (use suggested kind+value)",
+                   value="a", shortcut_key="a"),
+            Choice("  b  back to result list", value="b", shortcut_key="b"),
+        ],
+        style=QSTYLE,
+        use_shortcuts=True,
+        instruction="(single key)",
+    ).ask_async()
+
+    if choice == "o" and hit.url:
+        try:
+            webbrowser.open(hit.url)
+            console.print(f"[{tokens.OK}]opened[/] {hit.url}")
+        except Exception as e:
+            console.print(f"[{tokens.BAD}]failed:[/] {e}")
+    elif choice == "c" and hit.url:
+        ok, msg = _copy_to_clipboard(hit.url)
+        if ok:
+            console.print(f"[{tokens.OK}]copied[/]  {hit.url}")
+        else:
+            console.print(
+                f"[{tokens.WARN}]clipboard unavailable ({msg}) — select & copy manually:[/]\n"
+                f"   {hit.url}",
+            )
+    elif choice == "a":
+        extra = hit.extra or {}
+        sug_kind = extra.get("suggested_kind")
+        sug_value = extra.get("suggested_value")
+        if not sug_kind or not sug_value:
+            console.print(
+                f"[{tokens.DIM}]no adjacency suggestions for this source[/]",
+            )
+            return
+        try:
+            kind = QueryKind(str(sug_kind))
+        except ValueError:
+            console.print(
+                f"[{tokens.WARN}]adjacent kind unknown: {sug_kind!r}[/]",
+            )
+            return
+        new_query = Query(kind=kind, value=str(sug_value))
+        new_hits, ms = await run_query(db, new_query)
+        await after_results_menu(db, new_query, new_hits, ms)
+    # `b` / None — fall through and return
+
+
+# --------------------------------------------------------------------------- #
+# Did-you-mean for zero-hit results — Sprint 3 item 8
+# --------------------------------------------------------------------------- #
+
+_EMAIL_LIKE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+_PHONE_LIKE = re.compile(r"^[+0-9 ()\-]{6,}$")
+_DOMAIN_LIKE = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)+$",
+)
+
+
+def _history_candidates() -> list[str]:
+    """Newest-first deduplicated history values from the persistent FileHistory.
+
+    Returns ``[]`` on any IO failure — did-you-mean is a soft hint, not a
+    critical path.
+    """
+    try:
+        from prompt_toolkit.history import FileHistory
+
+        from app.ui.lookup_input import history_file_path
+        h = FileHistory(str(history_file_path()))
+        seen: set[str] = set()
+        out: list[str] = []
+        for entry in h.load_history_strings():
+            if entry and entry not in seen:
+                seen.add(entry)
+                out.append(entry)
+            if len(out) >= 200:
+                break
+        return out
+    except Exception:
+        return []
+
+
+def build_did_you_mean(
+    query: Query, hits: list[Hit],
+) -> list[tuple[str, QueryKind, str]]:
+    """Return up to 3 ``(label, kind, value)`` suggestions for a zero-hit run.
+
+    Two sources:
+      1. **closest historical match** — :func:`difflib.get_close_matches`
+         against the user's persisted lookup history (cutoff 0.6).
+      2. **type-misclassification** — if the value's shape *looks* like a
+         different kind than was used (``@`` → telegram, ``+``/digits →
+         phone, ``…@…`` → email, ``.`` → domain), suggest the alternative.
+
+    Pure function — easy to unit-test without spinning up the runner.
+    """
+    if any(h.status == HitStatus.FOUND for h in hits):
+        return []
+
+    value = (query.value or "").strip()
+    if not value:
+        return []
+
+    suggestions: list[tuple[str, QueryKind, str]] = []
+
+    # Source 1: history fuzzy match (must differ from the current value).
+    history = _history_candidates()
+    hist_pool = [h for h in history if h != value]
+    close = difflib.get_close_matches(value, hist_pool, n=1, cutoff=0.6)
+    if close:
+        label = f"{close[0]}  (closest match in your history)"
+        suggestions.append((label, query.kind, close[0]))
+
+    # Source 2: type-misclassification.
+    lower = value.lower()
+    if query.kind != QueryKind.EMAIL and _EMAIL_LIKE.match(lower):
+        suggestions.append(
+            (f"{lower} as email", QueryKind.EMAIL, lower),
+        )
+    if query.kind != QueryKind.TELEGRAM and value.startswith("@"):
+        suggestions.append(
+            (f"{value} as Telegram", QueryKind.TELEGRAM, value),
+        )
+    elif (
+        query.kind == QueryKind.USERNAME
+        and re.match(r"^[A-Za-z0-9_]{5,32}$", value)
+    ):
+        suggestions.append(
+            (f"@{value} as Telegram", QueryKind.TELEGRAM, f"@{value}"),
+        )
+
+    digits = re.sub(r"\D", "", value)
+    if (
+        query.kind != QueryKind.PHONE
+        and _PHONE_LIKE.match(value)
+        and 6 <= len(digits) <= 16
+        and not _EMAIL_LIKE.match(value)
+    ):
+        suggestions.append(
+            (f"{value} as phone", QueryKind.PHONE, value),
+        )
+
+    if (
+        query.kind != QueryKind.DOMAIN
+        and "." in value
+        and _DOMAIN_LIKE.match(value)
+    ):
+        suggestions.append(
+            (f"{value} as domain", QueryKind.DOMAIN, value),
+        )
+
+    # Dedupe while preserving order (label, kind, value triples).
+    seen: set[tuple[str, str]] = set()
+    deduped: list[tuple[str, QueryKind, str]] = []
+    for label, kind, val in suggestions:
+        key = (kind.value, val)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append((label, kind, val))
+        if len(deduped) >= 3:
+            break
+    return deduped
+
+
+def _render_did_you_mean(
+    query: Query, probed: int,
+    suggestions: list[tuple[str, QueryKind, str]],
+) -> Group:
+    """Render the zero-hit empty-state block. Sits ABOVE the summary card."""
+    rule_top = Text("   ── no positives " + "─" * 56, style=tokens.DIM)
+    line = Text("   ")
+    line.append("Probed ", style=tokens.DIM)
+    line.append(f"{probed} ", style=f"bold {tokens.FG}")
+    line.append("sources for ", style=tokens.DIM)
+    line.append(query.kind.value, style=tokens.DIM)
+    line.append(" ")
+    line.append(f"'{query.value}'", style=f"bold {tokens.FG}")
+    line.append(" — nothing found.", style=tokens.DIM)
+
+    intro = Text("   ")
+    intro.append("Did you mean to search:", style=f"bold {tokens.FG}")
+
+    rows = Table.grid(padding=(0, 1))
+    rows.add_column(width=8)
+    rows.add_column()
+    for i, (label, _kind, _val) in enumerate(suggestions, start=1):
+        rows.add_row(
+            Text(f"   ◆ [{i}]", style=f"bold {tokens.ACCENT}"),
+            Text(label, style=tokens.FG),
+        )
+
+    foot = Text("   ")
+    foot.append("Press ", style=tokens.DIM)
+    for i in range(1, len(suggestions) + 1):
+        foot.append(f"[{i}]", style=f"bold {tokens.ACCENT}")
+        if i < len(suggestions):
+            foot.append("/", style=tokens.DIM)
+    foot.append(" to switch & re-scan, or ", style=tokens.DIM)
+    foot.append("[n]", style=f"bold {tokens.ACCENT}")
+    foot.append(" for a new query.", style=tokens.DIM)
+
+    return Group(
+        Text(""),
+        rule_top,
+        Text(""),
+        line,
+        Text(""),
+        intro,
+        Text(""),
+        rows,
+        Text(""),
+        foot,
+        Text(""),
+    )
 
 
 async def action_export(query: Query, hits: list[Hit]) -> None:
@@ -1184,25 +1613,35 @@ async def _render_modules_table(r) -> None:
     except Exception:
         pass
 
+    col_widths = (14, 38, 12, 8, 8, 30)
     t = Table.grid(padding=(0, 2))
-    for w in (14, 38, 11, 8, 8, 14):
+    for w in col_widths:
         t.add_column(width=w, overflow="ellipsis", no_wrap=True)
     headers = ("NAME", "KINDS", "HEALTH", "STATE", "GLYPH", "7d")
     t.add_row(*[Text(h, style=f"bold {tokens.ACCENT}") for h in headers])
-    t.add_row(*[Text("─" * max(2, w - 2), style=tokens.DIM) for w in (14, 38, 11, 8, 8, 14)])
+    t.add_row(*[Text("─" * max(2, w - 2), style=tokens.DIM) for w in col_widths])
+
+    from app.ui.health import get_module_history, render_module_sparkline
 
     for i, m in enumerate(mods):
         kinds = ", ".join(k.value for k in sorted(m.kinds, key=lambda k: k.value))
+        history = get_module_history(m.name, limit=7)
         if m.enabled:
-            health_text, dot = "healthy", "●"
-            colour = tokens.OK
+            if history and history[-1][1] == "failed":
+                health_text, dot, colour = "failed", "●", tokens.BAD
+            elif history and history[-1][1] == "degraded":
+                health_text, dot, colour = "degraded", "●", tokens.WARN
+            elif history:
+                health_text, dot, colour = "healthy", "●", tokens.OK
+            else:
+                health_text, dot, colour = "untested", "○", tokens.DIM
         else:
-            health_text, dot = "disabled", "○"
-            colour = tokens.DIM
+            health_text, dot, colour = "disabled", "○", tokens.DIM
         state = "ready" if m.enabled else "off"
         glyph = tokens.MODULE_GLYPHS.get(m.name, "") or "—"
-        # Synthetic placeholder for 7d activity — could be wired to ModuleStats later
-        spark = _sparkline([2, 3, 4, 3, 5, 4, 6] if m.enabled else [0] * 7)
+        # Real 7-day sparkline from the persisted health store. Falls back to
+        # dim dots when the module hasn't been exercised yet.
+        spark = render_module_sparkline(m.name, limit=7)
         sel = i == 0
         pfx = "❯ " if sel else "  "
         name_cell = Text(pfx + m.name,

@@ -322,13 +322,9 @@ async def _stream_run(q: Query, args: argparse.Namespace, st: Style, sink) -> in
     if args.format == "plain":
         _result_box(result, elapsed_ms, st, sink)
     elif args.format == "json":
-        payload = {
-            "query": {"kind": q.kind.value, "value": q.value,
-                      "started_at": q.started_at.isoformat()},
-            "hits": [h.model_dump(mode="json") for h in hits],
-            "duration_ms": elapsed_ms,
-        }
-        json.dump(payload, sink, indent=2, default=str, ensure_ascii=False)
+        from app.core.json_schema import serialize_query_result
+        json.dump(serialize_query_result(result), sink, indent=2,
+                  default=str, ensure_ascii=False)
         print(file=sink)
     elif args.format == "csv":
         writer = csv.writer(sink)
@@ -446,6 +442,183 @@ def _handle_mcp_subcommand(argv: list[str]) -> int:
     return _mcp_main()
 
 
+def _handle_watch_subcommand(argv: list[str]) -> int:
+    """`osint watch ...` — Sprint 3 watchlist + Telegram notifier dispatcher."""
+    usage = (
+        "usage:\n"
+        "  osint watch add <kind> <value> [--label NAME] [--every HOURS]\n"
+        "  osint watch list [--due]\n"
+        "  osint watch remove <id|label>\n"
+        "  osint watch enable <id>\n"
+        "  osint watch disable <id>\n"
+        "  osint watch run [--all]\n"
+    )
+    sub = argv[0] if argv else ""
+    if sub in ("", "-h", "--help"):
+        print(usage, file=sys.stderr)
+        return 0 if sub else 2
+
+    from app.core.config import settings
+    from app.core.db import Database
+    from app.features import notify, watchlist
+
+    async def _run() -> int:
+        load_settings()
+        db = Database(settings().db_path)
+        await db.connect()
+        try:
+            if sub == "add":
+                rest = argv[1:]
+                label: str | None = None
+                every = 24
+                pos: list[str] = []
+                i = 0
+                while i < len(rest):
+                    tok = rest[i]
+                    if tok == "--label" and i + 1 < len(rest):
+                        label = rest[i + 1]; i += 2; continue
+                    if tok == "--every" and i + 1 < len(rest):
+                        try:
+                            every = int(rest[i + 1])
+                        except ValueError:
+                            print("--every needs an integer (hours)", file=sys.stderr); return 2
+                        i += 2; continue
+                    pos.append(tok); i += 1
+                if len(pos) < 2:
+                    print("usage: osint watch add <kind> <value> [--label NAME] [--every HOURS]",
+                          file=sys.stderr)
+                    return 2
+                try:
+                    entry = await watchlist.add(db, pos[0], pos[1], label=label, interval_h=every)
+                except ValueError as e:
+                    print(f"error: {e}", file=sys.stderr); return 2
+                print(f"  + watching #{entry.id} [{entry.kind}] {entry.value}"
+                      f"  (every {entry.interval_h}h"
+                      f"{', label=' + entry.label if entry.label else ''})")
+                return 0
+            if sub == "list":
+                only_due = "--due" in argv[1:]
+                rows = await watchlist.list_all(db, only_due=only_due)
+                if not rows:
+                    print("  (no watchlist entries)"
+                          + ("" if not only_due else " — none are due"))
+                    return 0
+                print(f"  {len(rows)} watch entr{'y' if len(rows) == 1 else 'ies'}:")
+                for e in rows:
+                    flag = "  " if e.enabled else "× "
+                    label = f" [{e.label}]" if e.label else ""
+                    last = e.last_run_at.isoformat(timespec="minutes") if e.last_run_at else "never"
+                    print(f"  {flag}#{e.id:<3} [{e.kind:8}] {e.value:<32}{label}"
+                          f"  every {e.interval_h}h  last={last}")
+                return 0
+            if sub == "remove":
+                if len(argv) < 2:
+                    print("usage: osint watch remove <id|label>", file=sys.stderr); return 2
+                tgt: int | str = argv[1]
+                if isinstance(tgt, str) and tgt.isdigit():
+                    tgt = int(tgt)
+                ok = await watchlist.remove(db, tgt)
+                print("  - removed" if ok else "  not found")
+                return 0 if ok else 1
+            if sub in ("enable", "disable"):
+                if len(argv) < 2 or not argv[1].isdigit():
+                    print(f"usage: osint watch {sub} <id>", file=sys.stderr); return 2
+                action = watchlist.enable if sub == "enable" else watchlist.disable
+                await action(db, int(argv[1]))
+                print(f"  {sub}d #{argv[1]}")
+                return 0
+            if sub == "run":
+                force_all = "--all" in argv[1:]
+                from app.core.db import Database as _Db  # noqa: F401
+                from app.core.runner import runner as _runner
+
+                async def on_new(entry, hits):
+                    msg = notify.format_watchlist_message(entry.value, hits)
+                    ok = await notify.send_to_self(msg)
+                    badge = "→ telegram" if ok else "→ log (telegram unreachable)"
+                    print(f"  • {entry.value}  {len(hits)} new  {badge}")
+
+                results = await watchlist.run_due(
+                    db, _runner(), on_new_finding=on_new, force_all=force_all
+                )
+                if not results:
+                    print("  (no new findings)")
+                return 0
+            print(usage, file=sys.stderr); return 2
+        finally:
+            await db.close()
+            try:
+                await close_client()
+            except Exception:
+                pass
+
+    return asyncio.run(_run())
+
+
+def _handle_diff_subcommand(argv: list[str]) -> int:
+    """`osint diff <kind> <value> [--from ID] [--to ID]` — compare two historical scans."""
+    usage = "usage: osint diff <kind> <value> [--from ID] [--to ID]"
+    if not argv or argv[0] in ("-h", "--help") or len(argv) < 2:
+        print(usage, file=sys.stderr)
+        return 0 if argv and argv[0] in ("-h", "--help") else 2
+
+    kind, value = argv[0], argv[1]
+    from_id: int | None = None
+    to_id: int | None = None
+    i = 2
+    while i < len(argv):
+        if argv[i] == "--from" and i + 1 < len(argv):
+            from_id = int(argv[i + 1]); i += 2; continue
+        if argv[i] == "--to" and i + 1 < len(argv):
+            to_id = int(argv[i + 1]); i += 2; continue
+        print(f"unknown arg: {argv[i]}\n{usage}", file=sys.stderr); return 2
+
+    from rich.console import Console as _RC
+
+    from app.core.config import settings
+    from app.core.db import Database
+    from app.core.types import QueryResult
+    from app.features import diff as diff_mod
+
+    async def _run() -> int:
+        load_settings()
+        db = Database(settings().db_path)
+        await db.connect()
+        try:
+            try:
+                QueryKind(kind)
+            except ValueError:
+                print(f"unknown kind {kind!r}; expected one of "
+                      f"{', '.join(k.value for k in QueryKind)}", file=sys.stderr); return 2
+            if from_id is None or to_id is None:
+                ids = await db.find_queries_for_value(kind, value, limit=10)
+                if len(ids) < 2:
+                    print(f"  need ≥2 prior scans of [{kind}] {value} — found {len(ids)}",
+                          file=sys.stderr); return 1
+                resolved_from = from_id if from_id is not None else ids[1]
+                resolved_to = to_id if to_id is not None else ids[0]
+            else:
+                resolved_from, resolved_to = from_id, to_id
+
+            old_q = await db.get_query(resolved_from)
+            new_q = await db.get_query(resolved_to)
+            if old_q is None or new_q is None:
+                print(f"  query id not found (from={resolved_from} to={resolved_to})",
+                      file=sys.stderr); return 1
+            old_hits = await db.hits_for(resolved_from)
+            new_hits = await db.hits_for(resolved_to)
+            old_res = QueryResult(query=old_q, hits=old_hits, total=len(old_hits),
+                                  found=sum(1 for h in old_hits if h.status == HitStatus.FOUND))
+            new_res = QueryResult(query=new_q, hits=new_hits, total=len(new_hits),
+                                  found=sum(1 for h in new_hits if h.status == HitStatus.FOUND))
+            diff_mod.render_diff(new_q, old_res, new_res, _RC())
+            return 0
+        finally:
+            await db.close()
+
+    return asyncio.run(_run())
+
+
 def main(argv: list[str] | None = None) -> int:
     if sys.platform == "win32":
         for _stream in (sys.stdout, sys.stderr):
@@ -459,6 +632,10 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_config_subcommand(raw[1:])
     if raw and raw[0] == "mcp":
         return _handle_mcp_subcommand(raw[1:])
+    if raw and raw[0] == "watch":
+        return _handle_watch_subcommand(raw[1:])
+    if raw and raw[0] == "diff":
+        return _handle_diff_subcommand(raw[1:])
 
     ap = _build_parser()
     args = ap.parse_args(argv)
