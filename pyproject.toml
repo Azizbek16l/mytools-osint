@@ -109,8 +109,12 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S", "PL"]
+"tests/**"  = ["S", "PL"]
 "scripts/**" = ["S", "PL"]
+# Agent tasks legitimately shell out to git/gh and call sync requests inside
+# async wrappers (subprocess + httpx are intentional — the runner just lifts
+# them off the main loop). Suppress the false-positives there.
+"agent/**"  = ["S", "PLW1510", "ASYNC210", "ASYNC221"]
 
 [tool.mypy]
 python_version = "3.11"

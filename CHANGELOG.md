@@ -4,36 +4,18 @@ All notable changes to this project. Format: Keep-a-Changelog · Semver.
 
 ## [Unreleased]
 
-### Added
-- `osint config` CLI — interactive wizard for Telegram MTProto sign-in + API key management. Writes to `%LOCALAPPDATA%\mytools-osint\config.env` (preserves existing Telegram session).
-- `app/modules/ssl_tls.py` — TLS cert + cipher grade per target host
-- `app/modules/http_headers.py` — security header scorer (Mozilla Observatory rubric)
-- `app/modules/asn_bgp.py` — Team Cymru WHOIS + BGPView (free, no key)
-- `app/modules/tech_fingerprint.py` — Wappalyzer-lite stack detection (~30 sigs)
-- Distribution foundation — `pyproject.toml` hatch backend, GitHub Actions release workflow, Dockerfile, Homebrew formula stub, .deb/.rpm/AppImage build via fpm.
-
 ### Changed
-- **Domain module rewritten** for proper subdomain enumeration. Each discovered subdomain now emits as its own Hit with the FQDN visible in the source column. Sources expanded from 3 → 8: crt.sh, Certspotter, HackerTarget, AlienVault OTX, subdomain.center, RapidDNS, Wayback CDX, ThreatMiner. Cross-source attestation shown ("seen by N sources").
+- ui: wire menu actions to real functionality (not just labels) (`21e1e90`)
+- ui: fix streaming dashboard flicker (whole TUI flashing on every frame) (`c7220d9`)
+- ui: fix Hero duplicate subtitle + spaced divider + lookup placeholder overlap (`9454e8f`)
+- ui: match Hero menu to mockup pixel-for-pixel (screens-a.jsx SCREEN 1) (`7677349`)
+- ui: apply CLI redesign from cli.zip handoff (9 screens) (`5425ac7`)
+- smart upgrade: outage classification + TaskGroup + retry policy + confidence dots (`72ce850`)
+- domain: rewrite subdomain enum with 8 free passive sources (`ec4eddc`)
 
-### Fixed
-- crt.sh timeout (was 30s, now 90s + 1 retry — service is slow on popular domains)
-- Wayback CDX query uses `matchType=domain` for proper subdomain enumeration
-- AlienVault OTX queries both passive_dns and url_list endpoints
-- SSL/TLS module timeout bumped 10s → 20s
+### Chores
+- chore: gitignore nuitka-crash-report.xml + remove from history (`869a5d1`)
 
-### Redesign (from cli.zip design handoff)
-- **Streaming dashboard** rewritten — split-pane layout (modules rail | live hits feed)
-  via `rich.Layout`. Per-module state (idle/running/done) + positive counter on the
-  left, timestamped hit feed on the right.
-- **Result summary card** — categorised findings (dev/social/media/breach/tls/tech/…),
-  sparkline of positive-arrival distribution, action menu with single-key shortcuts.
-- **Domain report** (kind=DOMAIN) — 3-column compact view: subdomains · DNS+TLS · headers+tech.
-- **Modules screen** — k9s-style table with NAME · KINDS · HEALTH · STATE · GLYPH · 7d sparkline.
-- **Sites stats** — categorised bar chart with COUNT · SHARE columns, percentage display.
-- **History** — 28-day heatmap sparkline above recent queries.
-- **Hero menu** — subtitle line with stats, single-key shortcuts on every menu.
-- New helpers: `_sparkline()`, `_classify()` (Hit→category mapping), `ModProgress`
-  (derived from live Hit stream), `db.history_heatmap()`.
 
 ## [0.1.0] - 2026-05-23
 
