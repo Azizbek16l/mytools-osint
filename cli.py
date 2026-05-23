@@ -447,6 +447,12 @@ def _handle_mcp_subcommand(argv: list[str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if sys.platform == "win32":
+        for _stream in (sys.stdout, sys.stderr):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, OSError):
+                pass
     from app import __version__ as _ver
     raw = list(sys.argv[1:] if argv is None else argv)
     if raw and raw[0] == "config":
