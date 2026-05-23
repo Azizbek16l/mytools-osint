@@ -43,3 +43,8 @@ nuitka-crash-report.xml
 # OS
 Thumbs.db
 .DS_Store
+
+# Agent runtime artefacts
+agent/STOP
+agent/data/journal.jsonl
+agent/data/proposals/

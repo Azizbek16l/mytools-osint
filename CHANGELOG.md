@@ -4,6 +4,10 @@ All notable changes to this project. Format: Keep-a-Changelog · Semver.
 
 ## [Unreleased]
 
+### Added
+- feat(agent): use Claude Code subscription via claude-agent-sdk (no extra cost) (`119e040`)
+- feat: Bluetm Agent â€” autonomous daily maintenance daemon (zero recurring cost) (`ffadf91`)
+
 ### Changed
 - ui: wire menu actions to real functionality (not just labels) (`21e1e90`)
 - ui: fix streaming dashboard flicker (whole TUI flashing on every frame) (`c7220d9`)
@@ -12,6 +16,10 @@ All notable changes to this project. Format: Keep-a-Changelog · Semver.
 - ui: apply CLI redesign from cli.zip handoff (9 screens) (`5425ac7`)
 - smart upgrade: outage classification + TaskGroup + retry policy + confidence dots (`72ce850`)
 - domain: rewrite subdomain enum with 8 free passive sources (`ec4eddc`)
+
+### Fixed
+- fix(scripts): install_local_agent.ps1 â€” ASCII-only + Interactive logon (`ab8699c`)
+- fix: IPv4/IPv6 â†’ QueryKind.IP (was silently routed to USERNAME) (`b3e50f5`)
 
 ### Chores
 - chore: gitignore nuitka-crash-report.xml + remove from history (`869a5d1`)

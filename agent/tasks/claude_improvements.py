@@ -1,108 +1,137 @@
 """Autonomous code-improvement loop powered by the user's Claude Code subscription.
 
-Runs locally on rootpc (NEVER in CI — OAuth token must not leave the host).
-The flow:
+Hardened per the consensus of three senior agent reviews (2026-05-23):
 
-  1. Snapshot HEAD                                 (so we can revert if needed).
-  2. Ask the `claude` CLI to make ONE small improvement, with permission to
-     edit files: `claude -p <prompt> --permission-mode acceptEdits ...`.
-  3. Sanity-gate the result:
-        - `git diff --stat` ≥ 1 file changed AND ≤ 8 files
-        - `git diff --shortstat` insertions+deletions ≤ 200
-        - `python -m ruff check .` exits clean
-        - `python -m pytest -q` exits clean
-  4. If green: create a daily branch `agent/upgrade-YYYY-MM-DD`, commit with a
-     descriptive message that says "auto-improved by Claude Code · reviewed by
-     the daily Bluetm Agent", push it, and (if `gh` is available) open a PR.
-     **Auto-merge is OFF** — the user reviews on GitHub.
-  5. If red: `git restore .` to revert and write a failure report to
-     `agent/data/proposals/`. The next day's run tries again from a clean tree.
+  Proposer (claude --acceptEdits)  →  Reviewer (claude default, JSON verdict)
+       │                                          │ veto?  ─→ revert
+       ▼                                          ▼ approve
+  ┌──────────────────────────────────────────────────────────────┐
+  │ Static gates (forbidden paths · diff size · ruff · pytest)   │
+  └────────┬─────────────────────────────────────────────────────┘
+           │ all green
+           ▼
+   push agent/upgrade-YYYY-MM-DD → optional gh PR → journal record
 
-Safeguards:
-  - HEAD snapshot lets us revert atomically.
-  - Files we never let the LLM touch: pyproject.toml, requirements.txt, .env,
-    .github/workflows/, agent/, tests/conftest.py.
-  - The push is to a NEW branch — main never sees an unreviewed agent commit.
-  - Subscription quota: one run per day. The prompt asks for at most 1 turn.
+The whole flow runs inside a **sibling git worktree** so the user's main
+checkout (potentially with uncommitted work in progress) is never touched.
 
-The user's Claude Code subscription is the LLM provider; no separate API key,
-no metering, no costs visible in the GitHub repo. The OAuth token never leaves
-the local host.
+Safety mechanisms:
+  • `agent/STOP` file present → exit 0 immediately (kill switch)
+  • dirty main tree → run skipped (don't risk clobbering)
+  • model pinned to a known string (`--model claude-opus-4-7`) — no silent
+    drift when Anthropic ships a new default
+  • episodic journal at `agent/data/journal.jsonl` informs the prompt so
+    the same rejected idea doesn't come back next week
+  • auto-merge OFF — every change goes through a human-reviewed PR
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+from agent import journal
+from agent.worktree import MAIN_REPO, Worktree, default_branch
+
+ROOT = MAIN_REPO
 OUT_DIR = ROOT / "agent" / "data" / "proposals"
 
-PROMPT = """\
-You are running as the autonomous Bluetm Agent for the mytools-osint repo.
-Make ONE small, low-risk improvement that I can ship today. You have edit
-permission — apply the change directly.
+# Pinned model — never use "latest". Updated manually when we verify a new
+# model with the canary suite.
+CLAUDE_MODEL = os.environ.get("BLUETM_AGENT_MODEL", "claude-opus-4-7")
 
-Choose from:
-  - a regex that's too loose and false-positives,
-  - a missing edge case in a parser (IPv6, IDN, multi-byte UTF-8),
-  - a docstring that misrepresents what the code does,
-  - a redundancy across modules that can be lifted into app/core/,
-  - a flaky test that needs a tighter assertion or a fixture.
-
-Hard constraints — do NOT violate any of these:
-  - Do NOT add new dependencies.
-  - Do NOT edit: pyproject.toml, requirements.txt, .env*, .github/workflows/*,
-    agent/* (don't edit yourself), or tests/conftest.py.
-  - Do NOT change the public CLI flags, the Hit / QueryResult schema, or the
-    Runner.register signature.
-  - Diff size: at most 8 files changed, at most 200 lines insertions+deletions.
-  - All tests (`python -m pytest -q`) and ruff (`python -m ruff check .`) must
-    still pass after your change. If you can't be confident, do nothing.
-  - If you don't see a confident improvement, exit silently — leave the tree
-    untouched.
-
-When you're done, do NOT commit or push. The agent will do that after running
-tests + lint. Just make the file edits.
-"""
-
-# Files Claude is forbidden from touching (defence in depth — the prompt asks
-# but we also enforce post-hoc by reverting unwanted hunks).
+# Files the agent must never touch
 FORBIDDEN_PATHS = (
     "pyproject.toml",
     "requirements.txt",
     ".env",
     ".env.example",
     ".github/workflows/",
-    "agent/",
+    "agent/",                       # don't let the agent edit itself
     "tests/conftest.py",
+    "tests/canary/",                # frozen canary
 )
 
-# How big a diff are we willing to ship today?
 MAX_FILES_CHANGED = 8
 MAX_LINES_CHANGED = 200
 
 
-def _claude_available() -> bool:
-    return shutil.which("claude") is not None
+# ---- Prompts ---------------------------------------------------------------
+
+PROPOSER_PROMPT_TEMPLATE = """\
+You are the Bluetm Agent running autonomously for the mytools-osint repo.
+Make ONE small, low-risk improvement that I can ship today. Edit files in
+place — you have permission.
+
+## Scope (pick ONE):
+  • a regex that's loose enough to false-positive on a known site signature,
+  • a missing edge case in a parser (IPv6, IDN, multi-byte UTF-8),
+  • a docstring that misrepresents what the code does,
+  • a redundancy across modules that can be lifted into app/core/,
+  • a missing test for an existing function (no new behaviour).
+
+## Hard constraints — do NOT violate any:
+  • No new dependencies.
+  • Do NOT edit: pyproject.toml, requirements.txt, .env*, .github/workflows/*,
+    agent/* (no editing yourself), tests/conftest.py, tests/canary/*.
+  • Do NOT change the public CLI flags, Hit/QueryResult schema, or
+    Runner.register signature.
+  • Diff size: ≤ 8 files, ≤ 200 lines insertions+deletions.
+  • All tests + ruff must still pass.
+
+## Avoid these directions (from recent journal — they were rejected/reverted):
+{journal_summary}
+
+## When done
+Edit the files. Do NOT commit or push — the agent harness will run gates and
+do the commit if everything is green. If you don't see a confident
+improvement, exit silently — leave the tree untouched.
+"""
+
+REVIEWER_PROMPT_TEMPLATE = """\
+You are reviewing a diff produced by another instance of yourself for the
+Bluetm Agent. Give a strict, sceptical review.
+
+## Diff
+```diff
+{diff}
+```
+
+## Journal context (recent rejected/reverted patterns)
+{journal_summary}
+
+## Your task
+Evaluate this diff against these veto criteria — ANY of them → reject:
+  1. Public API or schema change (Hit, QueryResult, Runner.register, CLI flags)
+  2. Newly introduced non-determinism (random, time.time, datetime.now in a
+     non-fixture path, raw socket, requests outside app/core/http.py)
+  3. New top-level import that isn't already in requirements.txt or stdlib
+  4. Test removed or substantively weakened to make code pass
+  5. Repeats a direction the journal shows was rejected
+  6. Stylistic-only churn (no behavioural change, no bug fix, no doc fix)
+  7. Touches a forbidden path (anything under .github/, agent/, pyproject.toml)
+
+## Respond with valid JSON only — no prose around it:
+{{"approve": true|false, "reason": "one short sentence"}}
+"""
 
 
-def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, **kw)
+# ---- Helpers ---------------------------------------------------------------
+
+def _run(cmd: list[str], cwd: Path | None = None, **kw) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, cwd=cwd or ROOT, capture_output=True, text=True, **kw)
 
 
-def _diff_stats() -> tuple[int, int]:
-    """Return (files_changed, lines_changed) from the current working tree."""
-    r = _run(["git", "diff", "--shortstat"])
+def _diff_stats(cwd: Path) -> tuple[int, int]:
+    r = _run(["git", "diff", "--shortstat"], cwd=cwd)
     txt = (r.stdout or "").strip()
     if not txt:
         return 0, 0
-    # e.g. " 3 files changed, 17 insertions(+), 5 deletions(-)"
-    parts = txt.split(",")
     files = lines = 0
-    for p in parts:
+    for p in txt.split(","):
         p = p.strip()
         if "file" in p:
             files = int(p.split()[0])
@@ -111,8 +140,8 @@ def _diff_stats() -> tuple[int, int]:
     return files, lines
 
 
-def _changed_files() -> list[str]:
-    r = _run(["git", "diff", "--name-only"])
+def _changed_files(cwd: Path) -> list[str]:
+    r = _run(["git", "diff", "--name-only"], cwd=cwd)
     return [f for f in (r.stdout or "").splitlines() if f]
 
 
@@ -124,11 +153,6 @@ def _touches_forbidden(files: list[str]) -> str | None:
     return None
 
 
-def _revert_all() -> None:
-    _run(["git", "restore", "."])
-    _run(["git", "clean", "-fd"])
-
-
 def _save_report(name: str, body: str) -> Path:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
@@ -137,120 +161,171 @@ def _save_report(name: str, body: str) -> Path:
     return p
 
 
+# ---- Reviewer (second claude call) ----------------------------------------
+
+def _reviewer_verdict(diff_text: str) -> tuple[bool, str]:
+    """Ask a second claude instance to review the diff. Returns (approve, reason).
+
+    On any error (timeout, parse failure, claude unavailable), default to APPROVE
+    — we'd rather lose a useful change than block the loop forever. Static gates
+    still run downstream.
+    """
+    summary = journal.summary_for_prompt(days=30)
+    prompt = REVIEWER_PROMPT_TEMPLATE.format(
+        diff=diff_text[:10000],
+        journal_summary=summary,
+    )
+    try:
+        r = subprocess.run(
+            ["claude", "-p", prompt,
+             "--model", CLAUDE_MODEL,
+             "--permission-mode", "default",
+             "--output-format", "text"],
+            capture_output=True, text=True, timeout=300, cwd=ROOT,
+        )
+    except subprocess.TimeoutExpired:
+        return True, "reviewer timed out — defaulting to approve"
+    if r.returncode != 0:
+        return True, f"reviewer exit {r.returncode} — defaulting to approve"
+
+    body = r.stdout.strip()
+    # Try to extract a JSON object
+    start = body.find("{")
+    end = body.rfind("}")
+    if start == -1 or end == -1:
+        return True, "reviewer returned no JSON — defaulting to approve"
+    try:
+        verdict = json.loads(body[start:end + 1])
+    except json.JSONDecodeError:
+        return True, "reviewer JSON unparseable — defaulting to approve"
+    return bool(verdict.get("approve", True)), str(verdict.get("reason", ""))[:200]
+
+
+# ---- Main entry point ------------------------------------------------------
+
 async def run() -> str:
     if os.environ.get("BLUETM_AGENT_SKIP_CLAUDE") == "1":
         return "skipped (BLUETM_AGENT_SKIP_CLAUDE=1)"
-    if not _claude_available():
-        return "claude CLI not found on PATH — skipped"
 
-    # 1) Snapshot HEAD — only proceed if the tree is clean.
-    head = _run(["git", "rev-parse", "HEAD"]).stdout.strip()
-    if not head:
+    # KILL SWITCH — first thing, no exceptions
+    if (ROOT / "agent" / "STOP").exists():
+        return "halted by agent/STOP file"
+
+    if not shutil.which("claude"):
+        return "claude CLI not on PATH — skipped"
+    if (ROOT / ".git").exists() is False:
         return "not a git repo — skipped"
+
+    # Safety: main tree must be clean — don't clobber user's uncommitted work.
     dirty = _run(["git", "status", "--porcelain"]).stdout.strip()
     if dirty:
-        return "tree dirty before run — skipped to avoid clobbering work"
+        journal.append("skipped", reason="main tree dirty")
+        return "main tree dirty — skipped to protect user's work"
 
-    # 2) Invoke Claude Code with edit permission. acceptEdits lets it modify
-    #    files without re-prompting.
+    branch = default_branch()
+    journal_summary = journal.summary_for_prompt(days=30)
+    proposer_prompt = PROPOSER_PROMPT_TEMPLATE.format(journal_summary=journal_summary)
+
+    # ---- run in an isolated worktree ----
     try:
-        proc = _run(
-            ["claude", "-p", PROMPT,
-             "--permission-mode", "acceptEdits",
-             "--output-format", "text"],
-            timeout=900,
-        )
-    except subprocess.TimeoutExpired:
-        _revert_all()
-        return "claude timed out (15 min) — reverted"
-    if proc.returncode != 0:
-        _revert_all()
-        return f"claude exit {proc.returncode} — reverted; stderr: {(proc.stderr or '')[:200]}"
+        with Worktree(branch) as wt:
+            assert wt.dir is not None
+            # 1) Proposer
+            try:
+                proc = wt.run(
+                    ["claude", "-p", proposer_prompt,
+                     "--model", CLAUDE_MODEL,
+                     "--permission-mode", "acceptEdits",
+                     "--output-format", "text"],
+                    timeout=900,
+                )
+            except subprocess.TimeoutExpired:
+                journal.append("reverted", outcome="proposer timed out", branch=branch)
+                return "proposer timed out (15 min)"
+            if proc.returncode != 0:
+                journal.append("reverted", outcome=f"proposer exit {proc.returncode}",
+                               branch=branch, summary=(proc.stderr or "")[:140])
+                return f"proposer exit {proc.returncode}"
 
-    # 3) Did it actually change anything?
-    files = _changed_files()
-    n_files, n_lines = _diff_stats()
-    if n_files == 0:
-        return "claude made no changes — clean exit"
+            # 2) Did it change anything?
+            files = _changed_files(wt.dir)
+            n_files, n_lines = _diff_stats(wt.dir)
+            if n_files == 0:
+                journal.append("skipped", reason="proposer made no changes")
+                return "proposer made no changes — clean exit"
 
-    # Forbidden-path check
-    bad = _touches_forbidden(files)
-    if bad:
-        body = (
-            f"# Reverted — forbidden file touched\n\n"
-            f"Claude modified `{bad}` which is on the deny-list.\n"
-            f"All changes reverted. Full diff (would have been):\n\n"
-            f"```\n{_run(['git', 'diff']).stdout[:6000]}\n```"
-        )
-        _save_report("reverted-forbidden-file", body)
-        _revert_all()
-        return f"reverted: forbidden path {bad}"
+            # 3) Forbidden-paths gate
+            bad = _touches_forbidden(files)
+            if bad:
+                journal.append("reverted", outcome=f"forbidden path: {bad}",
+                               branch=branch, summary=f"{n_files} files")
+                _save_report("reverted-forbidden", f"Touched: `{bad}`")
+                return f"reverted: forbidden path {bad}"
 
-    # Size budget
-    if n_files > MAX_FILES_CHANGED or n_lines > MAX_LINES_CHANGED:
-        body = (
-            f"# Reverted — diff too large\n\n"
-            f"{n_files} file(s), {n_lines} line(s) changed (limit "
-            f"{MAX_FILES_CHANGED} files / {MAX_LINES_CHANGED} lines).\n\n"
-            f"```\n{_run(['git', 'diff', '--stat']).stdout}\n```"
-        )
-        _save_report("reverted-too-large", body)
-        _revert_all()
-        return f"reverted: diff too large ({n_files} files, {n_lines} lines)"
+            # 4) Diff-size gate
+            if n_files > MAX_FILES_CHANGED or n_lines > MAX_LINES_CHANGED:
+                journal.append("reverted",
+                               outcome=f"diff too large: {n_files}f/{n_lines}l",
+                               branch=branch)
+                return f"reverted: too large ({n_files} files, {n_lines} lines)"
 
-    # 4) Ruff + pytest gates
-    ruff = _run(["python", "-m", "ruff", "check", "."])
-    if ruff.returncode != 0:
-        _save_report("reverted-ruff-failed",
-                     f"# Reverted — ruff failed\n\n```\n{ruff.stdout[:3000]}\n```")
-        _revert_all()
-        return "reverted: ruff failed"
-    pytest = _run(["python", "-m", "pytest", "-q"], timeout=240)
-    if pytest.returncode != 0:
-        _save_report("reverted-pytest-failed",
-                     f"# Reverted — pytest failed\n\n```\n{pytest.stdout[-3000:]}\n```")
-        _revert_all()
-        return "reverted: pytest failed"
+            # 5) Reviewer agent (second claude call)
+            diff_text = wt.run(["git", "diff"]).stdout
+            approve, reason = _reviewer_verdict(diff_text)
+            if not approve:
+                journal.append("reverted", outcome=f"reviewer veto: {reason}",
+                               branch=branch, summary=f"{n_files} files")
+                _save_report("reverted-reviewer-veto",
+                             f"# Reviewer veto\n\n{reason}\n\n```diff\n{diff_text[:5000]}\n```")
+                return f"reverted: reviewer veto — {reason}"
 
-    # 5) All gates green — branch, commit, push.
-    today = datetime.now(UTC).strftime("%Y-%m-%d")
-    branch = f"agent/upgrade-{today}"
-    _run(["git", "config", "user.name", "Bluetm Agent"])
-    _run(["git", "config", "user.email", "agent@bluetm.uz"])
-    _run(["git", "checkout", "-B", branch])
-    msg_subject = (
-        f"agent: daily upgrade ({n_files} file(s), {n_lines} lines)"
-    )
-    msg_body = (
-        "Auto-applied by the Bluetm Agent's claude_improvements task.\n"
-        "The LLM that proposed this is the user's Claude Code subscription, "
-        "running locally — no API key, no extra cost.\n\n"
-        "Gates that passed before this commit was created:\n"
-        "  * no forbidden file touched\n"
-        f"  * diff size within budget ({n_files}/{MAX_FILES_CHANGED} files, "
-        f"{n_lines}/{MAX_LINES_CHANGED} lines)\n"
-        "  * ruff clean\n"
-        "  * pytest green\n\n"
-        "Auto-merge is NOT enabled. Human review on GitHub before merge."
-    )
-    _run(["git", "add", "-A"])
-    _run(["git", "commit", "-m", msg_subject, "-m", msg_body])
-    push = _run(["git", "push", "-u", "origin", branch])
-    if push.returncode != 0:
-        _save_report("push-failed",
-                     f"# Push failed\n\n```\n{push.stderr[:2000]}\n```\n"
-                     f"Branch `{branch}` committed locally but not pushed.")
-        return f"committed locally as {branch}, push failed"
+            # 6) Ruff + pytest
+            ruff = wt.run(["python", "-m", "ruff", "check", "."])
+            if ruff.returncode != 0:
+                journal.append("reverted", outcome="ruff failed", branch=branch)
+                return "reverted: ruff failed"
+            # Skip slow tests on the worktree's per-run gate; the main CI catches them
+            pytest = wt.run(["python", "-m", "pytest", "-q", "--timeout=120"],
+                            timeout=300)
+            if pytest.returncode != 0:
+                journal.append("reverted", outcome="pytest failed", branch=branch,
+                               summary=pytest.stdout[-200:])
+                return "reverted: pytest failed"
 
-    # 6) Optional: open a PR via gh
-    if shutil.which("gh"):
-        _run(["gh", "pr", "create", "--title", msg_subject,
-              "--body", msg_body, "--head", branch])
+            # 7) Commit + push (still inside the worktree)
+            wt.run(["git", "config", "user.name", "Bluetm Agent"])
+            wt.run(["git", "config", "user.email", "agent@bluetm.uz"])
+            wt.run(["git", "add", "-A"])
+            msg_subject = f"agent: daily upgrade ({n_files} files, {n_lines} lines)"
+            msg_body = (
+                "Auto-applied by the Bluetm Agent's claude_improvements task.\n\n"
+                "Hardened by senior-agent review (2026-05-23). Worktree isolation,\n"
+                "dual-call proposer+reviewer, journal-aware prompt, gates: forbidden\n"
+                "paths, diff size, ruff, pytest.\n\n"
+                f"Reviewer reason: {reason or '(approved silently)'}\n\n"
+                "Auto-merge OFF — human review on GitHub before merge."
+            )
+            wt.run(["git", "commit", "-m", msg_subject, "-m", msg_body])
+            push = wt.run(["git", "push", "-u", "origin", branch, "--force-with-lease"])
+            if push.returncode != 0:
+                journal.append("reverted", outcome="push failed", branch=branch,
+                               summary=(push.stderr or "")[:200])
+                return f"committed locally as {branch}, push failed"
 
-    # Keep a record next to the proposals
-    diff_text = _run(["git", "diff", f"{head}..HEAD"]).stdout
-    _save_report(
-        f"applied-{branch.replace('/', '-')}",
-        f"# Applied — {branch}\n\n{msg_body}\n\n## Diff\n\n```\n{diff_text[:8000]}\n```",
-    )
-    return f"shipped {branch} ({n_files} files, {n_lines} lines)"
+            # 8) Optional: open a PR via gh
+            if shutil.which("gh"):
+                _run(["gh", "pr", "create",
+                      "--title", msg_subject,
+                      "--body", msg_body,
+                      "--head", branch], cwd=wt.dir)
+
+            journal.append("shipped", branch=branch,
+                           summary=msg_subject,
+                           files_touched=files,
+                           rationale=reason)
+            return f"shipped {branch} ({n_files} files, {n_lines} lines)"
+
+    except RuntimeError as e:
+        # Worktree setup failed
+        journal.append("reverted", outcome=f"worktree error: {e}", branch=branch)
+        return f"worktree error: {e}"

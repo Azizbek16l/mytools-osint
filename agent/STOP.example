@@ -1,0 +1,28 @@
+# Bluetm Agent kill switch
+#
+# The autonomous daily upgrade loop in agent/tasks/claude_improvements.py
+# checks for a file named `agent/STOP` at the very start of every run.
+# If that file exists, the agent exits 0 immediately and does nothing.
+#
+# Use this when:
+#   • You're in the middle of a refactor and don't want the agent running
+#     until you've landed your branch.
+#   • You suspect the agent has been mis-behaving (drifting, churning,
+#     re-proposing rejected ideas) and you want to pause and investigate.
+#   • A model upgrade landed and you want to verify behaviour manually
+#     before letting the cron fire again.
+#
+# To halt the agent from anywhere (e.g. your phone via Telegram bridge):
+#
+#     git checkout -b halt &&
+#     touch agent/STOP &&
+#     git add agent/STOP &&
+#     git commit -m "halt: pause Bluetm Agent" &&
+#     git push
+#
+# Then merge into main when convenient. The next day's cron will see the
+# file and exit silently. To re-enable, just delete the file and push.
+#
+# This file (`agent/STOP.example`) is committed only to document the pattern.
+# The real `agent/STOP` is gitignored — drop one locally on rootpc and the
+# cron will skip immediately even before the next push.
