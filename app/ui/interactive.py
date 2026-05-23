@@ -104,6 +104,21 @@ def _print_compact() -> None:
     console.print(f"\n{brand}{rest}")
 
 
+def _print_keybindings(*pairs: tuple[str, str]) -> None:
+    """Sticky keybinding hint — used at the bottom of every screen.
+
+    Mirrors lazygit / k9s — a 1-line dim cheatsheet so the user never has to
+    leave the screen to remember what `o`, `?`, `/`, `q` mean.
+    """
+    t = Text("   ")
+    for i, (key, label) in enumerate(pairs):
+        if i:
+            t.append("  ·  ", style=tokens.DIM)
+        t.append(key, style=f"bold {tokens.ACCENT}")
+        t.append(" " + label, style=tokens.DIM)
+    console.print(t)
+
+
 # ---- live streaming layout --------------------------------------------------
 
 def _status_marker(status: HitStatus) -> Text:
@@ -276,8 +291,9 @@ def _render_footer(query: Query, hits: list[Hit], elapsed_ms: int, done: bool) -
 
 # ---- streaming dashboard (split-pane layout per design handoff) ------------
 
-def _render_modules_rail(progress: dict[str, ModProgress], done: bool) -> Panel:
-    """Left rail — per-module status + counters."""
+def _render_modules_rail(progress: dict[str, ModProgress], done: bool) -> Group:
+    """Left rail — per-module status + counters. gh-style: no Panel chrome,
+    just a bold-dim title and a separator rule above the table."""
     t = Table.grid(padding=(0, 1))
     t.add_column(width=2, no_wrap=True)
     t.add_column(width=14)
@@ -301,20 +317,17 @@ def _render_modules_rail(progress: dict[str, ModProgress], done: bool) -> Panel:
                   Text(name, style=tokens.FG), cnt)
     active = sum(1 for p in progress.values() if p.state == "running")
     done_cnt = sum(1 for p in progress.values() if p.state == "done")
-    return Panel(
-        t,
-        title=Text("modules", style=f"bold {tokens.FG}"),
-        title_align="left",
-        subtitle=Text(f"{active} active · {done_cnt} done", style=tokens.DIM),
-        subtitle_align="left",
-        border_style=tokens.DIM,
-        padding=(0, 1),
-    )
+    header = Text()
+    header.append("modules", style=f"bold {tokens.FG}")
+    header.append(f"   {active} active · {done_cnt} done", style=tokens.DIM)
+    return Group(header, Text("─" * 26, style=tokens.DIM), t)
 
 
-def _render_hits_feed(hits: list[Hit]) -> Panel:
-    """Right pane — live positives feed with timestamp prefix."""
+def _render_hits_feed(hits: list[Hit]) -> Group:
+    """Right pane — live positives feed with timestamp prefix + status edge.
+    gh / delta style: no Panel chrome, status colour on left rule per row."""
     t = Table.grid(padding=(0, 1), expand=True)
+    t.add_column(width=1, no_wrap=True)          # delta-style left edge
     t.add_column(width=12, no_wrap=True)
     t.add_column(width=2, no_wrap=True)
     t.add_column(width=10, no_wrap=True)
@@ -330,27 +343,38 @@ def _render_hits_feed(hits: list[Hit]) -> Panel:
             h.status == HitStatus.NOT_FOUND and (h.category or "").startswith("breach")
         )
 
+    def _edge_colour(status: HitStatus) -> str:
+        return {
+            HitStatus.FOUND: tokens.OK,
+            HitStatus.RATELIMITED: tokens.WARN,
+            HitStatus.ERROR: tokens.BAD,
+            HitStatus.UNCERTAIN: tokens.WARN,
+        }.get(status, tokens.DIM)
+
     visible = [h for h in hits if _is_actionable(h)]
     for h in visible[-22:]:
         ts = h.found_at.strftime("%H:%M:%S.%f")[:-3] if h.found_at else ""
+        # OSC 8 hyperlink wrapping if URL present
+        url_render: Text
+        if h.url:
+            url_render = Text(h.url, style=f"{tokens.ACCENT}")
+            url_render.stylize(f"link {h.url}")
+        else:
+            url_render = Text(h.detail[:120] if h.detail else "", style=tokens.FG)
         t.add_row(
+            Text("│", style=_edge_colour(h.status)),
             Text(ts, style=tokens.DIM),
             _status_marker(h.status),
             Text(h.module, style=tokens.DIM),
             Text(h.source[:22], style=tokens.FG),
-            Text(h.detail[:120] if h.detail else (h.url or ""), style=tokens.FG),
+            url_render,
         )
     if not visible:
-        t.add_row("", "", "", "", Text("no positives yet …", style=tokens.DIM))
-    return Panel(
-        t,
-        title=Text("live hits", style=f"bold {tokens.FG}"),
-        subtitle=Text("positives + rate-limited shown", style=tokens.DIM),
-        title_align="left",
-        subtitle_align="left",
-        border_style=tokens.DIM,
-        padding=(0, 1),
-    )
+        t.add_row("", "", "", "", "", Text("no positives yet …", style=tokens.DIM))
+    header = Text()
+    header.append("live hits", style=f"bold {tokens.FG}")
+    header.append("   positives + rate-limited shown", style=tokens.DIM)
+    return Group(header, Text("─" * 60, style=tokens.DIM), t)
 
 
 def _render_streaming_layout(
@@ -578,7 +602,26 @@ def _render_summary_card(query: Query, hits: list[Hit], elapsed_ms: int) -> Grou
         cat_table.add_row("", "", "", Text("no positives — try a different query",
                                             style=tokens.DIM))
 
-    return Group(
+    # Numbered top-10 positives (so `o<n>` works in after_results_menu)
+    pos_table = Table.grid(padding=(0, 2))
+    pos_table.add_column(width=4, justify="right")
+    pos_table.add_column(width=12)
+    pos_table.add_column(width=24)
+    pos_table.add_column(ratio=1, overflow="ellipsis", no_wrap=True)
+    for i, h in enumerate(positives[:10], start=1):
+        url_text = Text(h.url, style=tokens.ACCENT) if h.url else Text(
+            h.detail[:90], style=tokens.DIM,
+        )
+        if h.url:
+            url_text.stylize(f"link {h.url}")
+        pos_table.add_row(
+            Text(f"[{i}]", style=f"bold {tokens.ACCENT}"),
+            Text(h.module, style=tokens.DIM),
+            Text(h.source[:24], style=f"bold {tokens.FG}"),
+            url_text,
+        )
+
+    parts = [
         Text(""),
         header,
         rule,
@@ -586,43 +629,82 @@ def _render_summary_card(query: Query, hits: list[Hit], elapsed_ms: int) -> Grou
         Text("   findings by category", style=tokens.DIM),
         Text(""),
         cat_table,
+    ]
+    if positives:
+        parts += [
+            Text(""),
+            Text(f"   top {min(len(positives), 10)} positives (use [N] to open)",
+                 style=tokens.DIM),
+            Text(""),
+            pos_table,
+        ]
+    parts += [
         Text(""),
         Text("   ─ what next ─", style=tokens.DIM),
         Text(""),
-    )
+    ]
+    return Group(*parts)
 
 
 # ---- menu actions -----------------------------------------------------------
 
 async def action_lookup(db: Database) -> bool:
-    """Single-prompt input — infer kind from value. Disambiguate only when needed.
+    """Single-prompt input with **live kind inference** in the bottom toolbar.
 
-    Hint line is printed ABOVE the prompt so the input box is clean.
+    Uses prompt_toolkit (already a transitive dep via questionary) so that as
+    the user types `torv...` the toolbar updates to `[USERNAME · 6 modules]`.
+    The user can commit with Enter or escape with Ctrl-C.
     """
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.formatted_text import FormattedText
+
     console.print()
     hint = Text("   ")
     hint.append("what are you looking for?", style=f"bold {tokens.FG}")
     console.print(hint)
     examples = Text("   ")
     examples.append("examples:  ", style=tokens.DIM)
-    examples.append("torvalds", style=tokens.ACCENT)
-    examples.append("   ", style=tokens.DIM)
-    examples.append("me@example.com", style=tokens.ACCENT)
-    examples.append("   ", style=tokens.DIM)
-    examples.append("+998948241222", style=tokens.ACCENT)
-    examples.append("   ", style=tokens.DIM)
-    examples.append("@durov", style=tokens.ACCENT)
-    examples.append("   ", style=tokens.DIM)
-    examples.append("marsits.uz", style=tokens.ACCENT)
+    for e in ("torvalds", "me@example.com", "+998948241222", "@durov", "marsits.uz"):
+        examples.append(e, style=tokens.ACCENT)
+        examples.append("   ", style=tokens.DIM)
     console.print(examples)
     console.print()
-    value = await questionary.text(
-        "",
-        style=QSTYLE,
-        validate=lambda s: True if s.strip() else "cannot be empty",
-        qmark="❯",
-        instruction="",
-    ).ask_async()
+
+    r = runner()
+
+    def _toolbar_for(buf_text: str) -> FormattedText:
+        v = (buf_text or "").strip()
+        if not v:
+            return FormattedText([
+                ("fg:#6e7681", "  start typing — kind is inferred live"),
+            ])
+        kind = _auto_kind(v)
+        if kind is None:
+            return FormattedText([
+                ("fg:#d29922", "  AMBIGUOUS"),
+                ("fg:#6e7681", " — disambiguator will appear after Enter"),
+            ])
+        n_modules = len(r.modules_for(kind))
+        return FormattedText([
+            ("fg:#3fb950 bold", f"  [{kind.value.upper()}]"),
+            ("fg:#6e7681", "  routes to "),
+            ("fg:#c9d1d9 bold", str(n_modules)),
+            ("fg:#6e7681", " module(s)  ·  press "),
+            ("fg:#58a6ff bold", "Enter"),
+            ("fg:#6e7681", " to probe, "),
+            ("fg:#58a6ff bold", "Ctrl-C"),
+            ("fg:#6e7681", " to cancel"),
+        ])
+
+    session: PromptSession[str] = PromptSession(
+        message=FormattedText([("fg:#58a6ff bold", "❯ ")]),
+        bottom_toolbar=lambda: _toolbar_for(session.default_buffer.text),
+        refresh_interval=0.15,
+    )
+    try:
+        value = await session.prompt_async()
+    except (KeyboardInterrupt, EOFError):
+        return True
     if not value:
         return True
     value = value.strip()
@@ -689,16 +771,23 @@ async def after_results_menu(db: Database, query: Query, hits: list[Hit],
 
 
 async def drill_open(positives: list[Hit]) -> None:
+    """Numbered picker — [1] [2] [3] etc. Mirrors the indices the summary card shows."""
     if not positives:
         return
-    choices = [Choice(f"{h.source[:22]:22}  {h.detail[:70]}", value=h.url or "")
-               for h in positives if h.url]
-    if not choices:
+    with_url = [h for h in positives if h.url]
+    if not with_url:
         console.print(f"[{tokens.WARN}]no positives have URLs to open[/]")
         return
-    choices.append(Choice("← cancel", value=""))
+    choices = [
+        Choice(f"  [{i}]  {h.source[:22]:22}  {h.detail[:70]}", value=h.url)
+        for i, h in enumerate(with_url, start=1)
+    ]
+    choices.append(Choice("  ← cancel", value=""))
     url = await questionary.select(
-        "open which?", choices=choices, style=QSTYLE,
+        "open which?",
+        choices=choices,
+        style=QSTYLE,
+        instruction="(↑↓ or 1-9)",
     ).ask_async()
     if url:
         try:
@@ -997,16 +1086,18 @@ async def action_settings_overview() -> None:
 
 # ---- main loop --------------------------------------------------------------
 
-async def run_interactive() -> int:
+async def run_interactive(show_figlet: bool = False) -> int:
     """Top-level interactive shell. Returns process exit code.
 
-    Cold-start: BLUETM.UZ figlet (once) + single status subtitle.
-    Each iteration: subtle section header → questionary list (no chrome).
+    Cold-start: compact one-line brandmark by default (gh / starship style).
+    The full BLUETM.UZ figlet is gated behind --banner — top-tier 2026 CLIs
+    (gh, charm, lazygit, btop, starship) all skip the figlet by default; we
+    follow suit.
     """
-    # Banner figlet ONLY (skip the .render() subtitles to avoid duplicates)
     from app import __version__ as _ver
-    from app.ui.banner import ASCII_ART
-    console.print(Text(ASCII_ART, style=tokens.ACCENT))
+    if show_figlet:
+        from app.ui.banner import ASCII_ART
+        console.print(Text(ASCII_ART, style=tokens.ACCENT))
 
     try:
         from app.modules.username import load_sites
@@ -1070,8 +1161,12 @@ async def run_interactive() -> int:
                 style=QSTYLE,
                 use_shortcuts=True,
                 qmark="",
-                instruction="(↑↓ or single key  ·  ↵ select)",
+                instruction="(↑↓ or l/h/m/s/t/q)",
             ).ask_async()
+            _print_keybindings(
+                ("↑↓", "navigate"), ("↵", "select"),
+                ("l/h/m/s/t", "jump"), ("q", "quit"),
+            )
             if choice in (None, "exit"):
                 console.print(f"\n[{tokens.DIM}]bye — {BRAND}[/]\n")
                 return 0

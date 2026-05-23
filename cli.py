@@ -391,6 +391,8 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="show per-source diagnostics, summaries, and upstream outages")
     ap.add_argument("--per-source", action="store_true",
                     help="emit one Hit per (subdomain, source) instead of deduplicated rows")
+    ap.add_argument("--banner", action="store_true",
+                    help="show the full BLUETM.UZ figlet banner (default: compact one-liner)")
     return ap
 
 
@@ -425,11 +427,32 @@ def _handle_config_subcommand(argv: list[str]) -> int:
     return 2
 
 
+def _handle_mcp_subcommand(argv: list[str]) -> int:
+    """`osint mcp` — start the Model Context Protocol server over stdio.
+
+    Used by Claude Code, Warp Agents, Cursor and other MCP-aware clients.
+    Stdout is reserved for the MCP transport — diagnostics go to stderr.
+    """
+    if argv and argv[0] in {"-h", "--help"}:
+        print(
+            "usage: osint mcp\n\n"
+            "Start the mytools-osint MCP server over stdio. Wire it into\n"
+            "your AI agent's config (see agent/mcp.json for an example).",
+            file=sys.stderr,
+        )
+        return 0
+    load_settings()
+    from app.mcp.server import main as _mcp_main
+    return _mcp_main()
+
+
 def main(argv: list[str] | None = None) -> int:
     from app import __version__ as _ver
     raw = list(sys.argv[1:] if argv is None else argv)
     if raw and raw[0] == "config":
         return _handle_config_subcommand(raw[1:])
+    if raw and raw[0] == "mcp":
+        return _handle_mcp_subcommand(raw[1:])
 
     ap = _build_parser()
     args = ap.parse_args(argv)
@@ -455,7 +478,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.interactive or (not args.value and sys.stdin.isatty()):
         from app.ui.interactive import run_interactive
         load_settings()
-        return asyncio.run(run_interactive())
+        return asyncio.run(run_interactive(show_figlet=bool(args.banner)))
 
     if not args.value:
         print(render_banner(st))

@@ -1,0 +1,17 @@
+{
+  "_comment": "Example MCP server registration for mytools-osint. Paste the `mcpServers` block into your AI agent's MCP config: Claude Code uses ~/.claude/mcp.json (or .claude/mcp.json per-project), Warp Agents uses ~/.warp/mcp.json, Cursor uses ~/.cursor/mcp.json.",
+  "mcpServers": {
+    "mytools-osint": {
+      "command": "osint",
+      "args": ["mcp"]
+    }
+  },
+  "_alternatives": {
+    "_comment": "If the `osint` console script is not on PATH, invoke via the Python module directly.",
+    "mytools-osint-via-python": {
+      "command": "python",
+      "args": ["-m", "cli", "mcp"],
+      "cwd": "D:/Code/mytools"
+    }
+  }
+}
