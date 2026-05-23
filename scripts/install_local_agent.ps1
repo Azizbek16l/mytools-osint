@@ -28,7 +28,7 @@ $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path "$PSScriptRoot\..").Path
 $python = Join-Path $repo ".venv\Scripts\python.exe"
 if (-not (Test-Path $python)) {
-    Write-Error "Python venv not found at $python — run 'python -m venv .venv && pip install -r requirements.txt' first."
+    Write-Error "Python venv not found at $python - run 'python -m venv .venv && pip install -r requirements.txt' first."
 }
 
 $taskName = "BluetmAgentDaily"
@@ -47,7 +47,7 @@ $settings = New-ScheduledTaskSettingsSet `
 
 $principal = New-ScheduledTaskPrincipal `
     -UserId $env:USERNAME `
-    -LogonType S4U `
+    -LogonType Interactive `
     -RunLevel Limited
 
 Register-ScheduledTask `
@@ -56,13 +56,13 @@ Register-ScheduledTask `
     -Trigger $trigger `
     -Settings $settings `
     -Principal $principal `
-    -Description "Bluetm Agent — daily maintenance for mytools-osint" `
+    -Description "Bluetm Agent - daily maintenance for mytools-osint" `
     -Force | Out-Null
 
-Write-Host "✓ Scheduled task '$taskName' registered." -ForegroundColor Green
+Write-Host "[OK] Scheduled task '$taskName' registered." -ForegroundColor Green
 Write-Host "  Repo:      $repo"
 Write-Host "  Python:    $python"
-Write-Host "  Schedule:  daily at $("{0:D2}:00" -f $Hour) local time"
+Write-Host ("  Schedule:  daily at {0:D2}:00 local time" -f $Hour)
 Write-Host ""
 Write-Host "Run once now (sanity check):"
 Write-Host "  Start-ScheduledTask -TaskName $taskName"
@@ -71,4 +71,5 @@ Write-Host "Inspect last run:"
 Write-Host "  Get-ScheduledTaskInfo -TaskName $taskName"
 Write-Host ""
 Write-Host "Uninstall:"
-Write-Host "  Unregister-ScheduledTask -TaskName $taskName -Confirm:`$false"
+$uninstallHint = '  Unregister-ScheduledTask -TaskName ' + $taskName + ' -Confirm:$false'
+Write-Host $uninstallHint
