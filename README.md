@@ -54,6 +54,75 @@ osint example.com --opsec                                    # SOCKS5 + jitter
 Profile presets: `quick · deep · person · domain-recon · red-team · blue-team · ioc`.
 List them with `osint --list-profiles`.
 
+## How it compares
+
+|                          | Sherlock | Maigret | Holehe | theHarvester | **mytools-osint** |
+|--------------------------|:--------:|:-------:|:------:|:------------:|:-----------------:|
+| Username probe (sites)   | ~400     | ~3000   | —      | —            | **1,008** (Sherlock + WhatsMyName; +Maigret via sync) |
+| Email breach lookup      | —        | —       | ~120   | partial      | **XposedOrNot + HudsonRock + ProxyNova + Holehe ports** |
+| Phone (libphonenumber + TG MTProto) | — | — | — | — | **yes** |
+| Domain / subdomain enum  | —        | —       | —      | **yes**      | **crt.sh + HackerTarget + OTX + urlscan + RapidDNS + subdomain.center + ThreatMiner + Wayback** |
+| SSL/TLS posture grade    | —        | —       | —      | —            | **yes** |
+| HTTP-headers (Observatory-style) | — | —   | —      | —            | **yes** |
+| Tech fingerprint (Wappalyzer-lite) | — | — | —      | —            | **yes** |
+| Shodan InternetDB (no key, CVEs per IP) | — | — | — | —       | **yes** |
+| Subdomain takeover detector | —     | —       | —      | —            | **yes (20 services)** |
+| JS-source secret scanner | —        | —       | —      | —            | **yes (15 patterns)** |
+| Wayback `.env/.git/admin` goldmine | — | — | —    | —            | **yes** |
+| Favicon mmh3 (Shodan pivoting) | —  | —       | —      | —            | **yes (pure-Python)** |
+| DMARC / SPF / DKIM / MTA-STS grader | — | —  | —      | —            | **yes** |
+| Typosquat generator + DNS check | — | —      | —      | —            | **yes (134+ candidates)** |
+| Threat-intel (URLhaus + ThreatFox + PhishTank) | — | — | — | —     | **yes** |
+| Tor relay / exit check   | —        | —       | —      | —            | **yes (onionoo)** |
+| PGP key lookup           | —        | —       | —      | —            | **yes (openpgp.org + Ubuntu)** |
+| Profile presets          | —        | —       | —      | —            | **yes (7 presets)** |
+| Live TUI dashboard       | —        | —       | —      | —            | **yes (textual)** |
+| HTML report (pivot graph)| —        | —       | —      | —            | **yes (single-file, no CDN)** |
+| JSON-lines streaming     | —        | partial | —      | —            | **yes** |
+| Bulk mode (file-of-targets) | partial | yes  | yes    | —            | **yes** |
+| OPSEC mode (SOCKS5h + jitter + UA rotation) | partial | partial | — | — | **yes** |
+| Telegram MTProto resolve | —        | —       | —      | —            | **yes (your own session)** |
+| MCP server (Claude/Cursor) | —      | —       | —      | —            | **yes** |
+| Watchlist + diff + notify| —        | —       | —      | —            | **yes** |
+| Free APIs only / no paid keys | yes | yes     | yes    | mostly       | **yes** |
+| Single-binary (Nuitka)   | —        | —       | —      | —            | **yes (CLI + GUI)** |
+
+*Comparison made in good faith from each project's README as of 2026-05; corrections welcome.*
+
+## Architecture
+
+```
+        ┌──────────────────────────────────────────────────────────────┐
+        │                          INPUT                                │
+        │      username  ·  email  ·  +phone  ·  @tg  ·  domain  ·  IP  │
+        └────────────────────────────┬─────────────────────────────────┘
+                                     │ infer_kind() — IP > email > phone > domain > username
+                                     ▼
+        ┌──────────────────────────────────────────────────────────────┐
+        │                   Runner (asyncio TaskGroup)                  │
+        │           one shared httpx.AsyncClient · HTTP/2 · UA-rotate  │
+        │           Semaphore(HTTP_CONCURRENCY=40) caps in-flight req  │
+        └────────────────────────────┬─────────────────────────────────┘
+              ┌──────────┬───────────┼───────────┬──────────┬────────┐
+              ▼          ▼           ▼           ▼          ▼        ▼
+        username      email      phone     telegram     domain     IP …
+        (1008 sites)  +extras  libphone  MTProto    crt.sh+      InternetDB
+                                                    8 sources    +threat_intel
+                                                                 +tor_check
+              │          │           │           │           │          │
+              └──────────┴───────────┴─────┬─────┴───────────┴──────────┘
+                                           │ Hit (status · severity · category · extra)
+                                           ▼
+        ┌──────────────────────────────────────────────────────────────┐
+        │  CLI plain   │  CLI jsonl   │  CSV   │  HTML report  │  TUI  │
+        │  (severity   │  (pipe to    │ (xlsx) │  (SVG pivot   │ (live │
+        │   coloured)  │   jq, splunk)│        │   graph)      │ dash) │
+        └──────────────────────────────────────────────────────────────┘
+                                           ▼
+                                  aiosqlite WAL DB
+                          (history · diff · watchlist · cache)
+```
+
 ## Install
 
 ### macOS
@@ -110,10 +179,10 @@ chmod +x osint && sudo mv osint /usr/local/bin/
 
 ```powershell
 # winget (Windows 11)
-winget install Azizbek16l.MytoolsOsint
+winget install Bluetm.MytoolsOsint
 
 # OR scoop
-scoop bucket add Azizbek16l https://github.com/Azizbek16l/scoop-bucket
+scoop bucket add bluetm https://github.com/Azizbek16l/scoop-bucket
 scoop install mytools-osint
 
 # OR pipx
@@ -241,6 +310,13 @@ pip install nuitka ordered-set zstandard
 python scripts/build_cli.py       # → dist/osint
 python scripts/build_exe.py       # → dist/mytools-osint (GUI)
 ```
+
+## Docs
+
+- [docs/red-team-playbook.md](docs/red-team-playbook.md) — recon flow for an authorized engagement, with OPSEC first
+- [docs/blue-team-playbook.md](docs/blue-team-playbook.md) — SOC / CTI use: baseline + drift + IOC triage
+- [docs/sources.md](docs/sources.md) — every external source the tool talks to, with rate-limit notes
+- [packaging/README.md](packaging/README.md) — install-command quick-reference for every channel + release runbook
 
 ## Authorised use only
 
