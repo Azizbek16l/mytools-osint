@@ -79,7 +79,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
-include = ["cli.py", "main.py", "data/**/*.json"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"cli.py" = "cli.py"
+"main.py" = "main.py"
+"data" = "data"
 
 [tool.hatch.build.targets.sdist]
 include = [
