@@ -16,6 +16,8 @@ class QueryKind(StrEnum):
     WHATSAPP = "whatsapp"
     IP = "ip"
     DOMAIN = "domain"
+    PASSWORD = "password"   # noqa: S105 — kind identifier, not a password value
+    HASH = "hash"           # md5/sha1/sha256 for malware / IOC lookups
 
 
 class HitStatus(StrEnum):

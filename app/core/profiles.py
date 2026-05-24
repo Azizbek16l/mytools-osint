@@ -17,18 +17,20 @@ _TIER_A = {
     "telegram", "whatsapp", "ip", "ip_extras", "internetdb",
     "domain", "asn_bgp", "ssl_tls", "http_headers",
     "tech_fingerprint", "threat_intel", "tor_check", "pgp_keys",
+    "well_known", "web_hardening",
 }
 
 # Anything that takes longer or generates many rows.
 _TIER_B = {
     "discovery", "patterns", "adjacency", "takeover", "web_recon",
-    "typosquat",
+    "typosquat", "cloud_buckets", "subdomain_brute", "github_leaks",
+    "malware_bazaar", "hibp_passwords",
 }
 
 
 PROFILES: dict[str, set[str]] = {
     # --- defaults ---
-    "default": _TIER_A | _TIER_B,            # everything (current behavior)
+    "default": _TIER_A | _TIER_B,            # everything
     "all": _TIER_A | _TIER_B,                # alias
 
     # --- speed-vs-depth dial ---
@@ -38,27 +40,40 @@ PROFILES: dict[str, set[str]] = {
     # --- intent presets ---
     "person": {
         "username", "email", "email_extras", "phone", "telegram",
-        "whatsapp", "patterns", "pgp_keys", "discovery",
+        "whatsapp", "patterns", "pgp_keys", "discovery", "github_leaks",
     },
     "domain-recon": {
         "domain", "ssl_tls", "http_headers", "tech_fingerprint",
         "asn_bgp", "email_security", "web_recon", "takeover",
-        "typosquat", "threat_intel", "internetdb",
+        "typosquat", "threat_intel", "internetdb", "well_known",
+        "web_hardening", "subdomain_brute",
     },
     "red-team": {
         "domain", "ssl_tls", "http_headers", "tech_fingerprint",
         "asn_bgp", "email_security", "web_recon", "takeover",
         "typosquat", "threat_intel", "internetdb", "ip_extras",
         "tor_check", "patterns", "discovery", "adjacency",
+        "well_known", "web_hardening", "github_leaks", "cloud_buckets",
+        "subdomain_brute",
     },
     "blue-team": {
         # what would a defender want? exposed surface + reputation.
         "internetdb", "threat_intel", "tor_check", "email_security",
         "ip_extras", "ssl_tls", "http_headers", "takeover", "typosquat",
+        "well_known", "web_hardening", "cloud_buckets",
     },
     "ioc": {
-        # given a domain/IP, is it known-bad? minimal noise.
+        # given a domain/IP/hash, is it known-bad? minimal noise.
         "threat_intel", "tor_check", "ip_extras", "internetdb",
+        "malware_bazaar",
+    },
+    "creds": {
+        # password / hash / username breach triage
+        "hibp_passwords", "malware_bazaar", "email_extras",
+    },
+    "leak-hunt": {
+        # find leaks of an org's data in public repos + buckets + waybacks
+        "github_leaks", "cloud_buckets", "web_recon", "well_known",
     },
 }
 

@@ -2,6 +2,54 @@
 
 All notable changes to this project. Format: Keep-a-Changelog · Semver.
 
+## [0.3.0] - 2026-05-24  —  cyber-pro: web dashboard + 7 modules + self-update
+
+### Added — new OSINT modules (free; key-optional)
+- **github_leaks** — GitHub code+commit+user search for domain/email. Finds
+  leaked configs, employee side-projects, public org mentions. Optional
+  `GITHUB_PAT` for higher rate.
+- **cloud_buckets** — S3 + Azure Blob + GCS + Backblaze B2 + DO Spaces enum
+  across 25 name permutations × 6 clouds (~150 probes). Anonymous-list
+  hits become CRITICAL.
+- **hibp_passwords** — Pwned-Passwords k-anonymity check (`--kind password`);
+  only first 5 SHA-1 hex chars leave the host.
+- **malware_bazaar** — abuse.ch hash IOC lookup (`--kind hash`); md5/sha1/sha256.
+- **web_hardening** — CORS misconfig + cookie security audit + robots/sitemap
+  interesting-path scan + HTTP-methods (OPTIONS) probe. All passive.
+- **well_known** — `/.well-known/*` discovery (security.txt · openid-config ·
+  oauth-AS · webfinger · aasa · assetlinks · matrix · saml · ai.txt · 24 paths).
+- **subdomain_brute** — passive DNS brute on ~280 curated subdomain names
+  (admin · api · vpn · gitlab · grafana · s3 · …). No traffic to webserver.
+
+### Added — query kinds
+- `password` (HIBP k-anon)
+- `hash` (md5/sha1/sha256 IOC lookups)
+- `infer_kind()` detects 32/40/64/128-hex inputs as HASH automatically
+
+### Added — UI / UX
+- **`osint serve`** — local web dashboard at http://127.0.0.1:8765 (stdlib
+  asyncio, zero extra deps). Live findings stream via SSE; dark theme;
+  profile + kind dropdowns; severity-coloured rows.
+- **`--md FILE`** — Markdown report (GitHub-issue / Notion ready). KPI table
+  + top-findings table + per-module sections.
+- 2 new profile presets: **`creds`** and **`leak-hunt`**.
+
+### Added — DevOps
+- **`osint self-update`** — pulls latest release binary, verifies SHA-256,
+  swaps in place. Detects pipx / brew / scoop installs and routes the user
+  to the right package manager. `--check` for non-mutating check.
+- **`scripts/install.sh`** — `curl | bash` installer (PATH-friendly).
+- **`scripts/mac-autoupdate.sh`** — launchd weekly auto-update for macOS.
+
+### Fixed
+- `pyproject.toml`: cli.py + main.py were installed as data files, not
+  importable modules → `osint` entry point failed. Now via hatch
+  `force-include` so they land at the wheel root.
+
+### Module count: 24 → **31** (+7)
+### Test count:   193 → **204** (+11 offline tests via httpx.MockTransport)
+
+
 ## [0.2.0] - 2026-05-24  —  red-team boost
 
 ### Added — new OSINT modules (all free, no paid keys)

@@ -48,6 +48,8 @@ _DOMAIN_RE = re.compile(
     r"^[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?"
     r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)+$"
 )
+# md5 = 32, sha1 = 40, sha256 = 64, sha512 = 128. Must be all hex.
+_HASH_RE = re.compile(r"^[a-fA-F0-9]+$")
 
 
 def infer_kind(value: str) -> QueryKind:
@@ -62,6 +64,9 @@ def infer_kind(value: str) -> QueryKind:
         pass
     if _EMAIL_RE.match(v):
         return QueryKind.EMAIL
+    # Hash detection — before phone (a 32-digit hex could look like digits).
+    if _HASH_RE.match(v) and len(v) in (32, 40, 64, 128):
+        return QueryKind.HASH
     digits = re.sub(r"\D", "", v)
     if _PHONE_RE.match(v) and 6 <= len(digits) <= 16:
         return QueryKind.PHONE
@@ -381,12 +386,20 @@ async def _stream_run(q: Query, args: argparse.Namespace, st: Style, sink) -> in
         try:
             from app.ui.html_report import render_report
             html = render_report(q, result, elapsed_ms)
-            # Sync I/O inside async — fine for a one-shot file write.
             await asyncio.to_thread(Path(args.html).write_text, html,
                                     encoding="utf-8")
             print(st.dim(f"  html report → {args.html}"), file=sys.stderr)
         except Exception as e:
             print(st.bad(f"  html report failed: {e}"), file=sys.stderr)
+
+    if getattr(args, "md", None):
+        try:
+            from app.ui.md_report import render_markdown
+            md = render_markdown(q, result, elapsed_ms)
+            await asyncio.to_thread(Path(args.md).write_text, md, encoding="utf-8")
+            print(st.dim(f"  markdown report → {args.md}"), file=sys.stderr)
+        except Exception as e:
+            print(st.bad(f"  markdown report failed: {e}"), file=sys.stderr)
 
     return 0 if result.found > 0 else 1
 
@@ -543,6 +556,8 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="launch the live Textual dashboard for this query")
     ap.add_argument("--html", default=None, metavar="FILE",
                     help="write a self-contained HTML report to FILE")
+    ap.add_argument("--md", default=None, metavar="FILE",
+                    help="write a Markdown report (great for GitHub issues / Notion)")
     return ap
 
 
@@ -790,6 +805,16 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_watch_subcommand(raw[1:])
     if raw and raw[0] == "diff":
         return _handle_diff_subcommand(raw[1:])
+    if raw and raw[0] in ("self-update", "selfupdate", "update"):
+        from app.features.self_update import cmd_self_update
+        return cmd_self_update(check_only=("--check" in raw[1:]))
+    if raw and raw[0] == "serve":
+        from app.ui.web import serve as _serve
+        port = 8765
+        for i, a in enumerate(raw[1:]):
+            if a == "--port" and i + 1 < len(raw[1:]):
+                port = int(raw[1:][i + 1])
+        return _serve(port=port)
 
     ap = _build_parser()
     args = ap.parse_args(argv)

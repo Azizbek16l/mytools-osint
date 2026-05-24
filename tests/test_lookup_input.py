@@ -122,11 +122,11 @@ def _completions_for(completer, text: str) -> list[str]:
 def test_kind_completer_yields_kinds(tmp_path: Path) -> None:
     history = FileHistory(str(tmp_path / "h.txt"))
     completer = build_completer(history)
-    # FuzzyCompleter ranks/filters but the seven kinds must all be reachable.
+    # FuzzyCompleter ranks/filters but ALL registered kinds must be reachable.
     completions = _completions_for(completer, "--kind=")
     # Order is up to FuzzyCompleter — assert set equality.
     assert set(completions) == set(KIND_VALUES)
-    assert len(completions) == 7
+    assert len(completions) == len(KIND_VALUES)
     # Narrowing — `--kind=u` should still produce `username`.
     completions_u = _completions_for(completer, "--kind=u")
     assert "username" in completions_u
