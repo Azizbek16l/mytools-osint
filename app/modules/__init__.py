@@ -21,6 +21,7 @@ from . import internetdb as _internetdb
 from . import ip as _ip
 from . import ip_extras as _ip_extras
 from . import malware_bazaar as _malware_bazaar
+from . import passive_dns as _passive_dns
 from . import patterns as _patterns
 from . import pgp_keys as _pgp_keys
 from . import phone as _phone
@@ -49,7 +50,7 @@ MODULES = [
     _email_security, _typosquat, _pgp_keys, _tor_check,
     # cyber-pro v0.3 additions
     _github_leaks, _cloud_buckets, _hibp_passwords, _malware_bazaar,
-    _web_hardening, _well_known, _subdomain_brute,
+    _web_hardening, _well_known, _subdomain_brute, _passive_dns,
 ]
 
 
