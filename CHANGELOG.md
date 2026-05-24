@@ -2,6 +2,26 @@
 
 All notable changes to this project. Format: Keep-a-Changelog · Semver.
 
+## [0.3.1] - 2026-05-25  —  passive_dns + interactive bug-fixes
+
+### Added
+- **`passive_dns`** module — historical resolution data via HackerTarget
+  (reverse-DNS), AlienVault OTX, and CIRCL pDNS. For DOMAIN + IP kinds.
+  Brings module count to **32**.
+
+### Fixed
+- `interactive` shell — selecting "settings" raised
+  `RuntimeError: asyncio.run() cannot be called from a running event loop`
+  (cmd_wizard is sync but internally calls asyncio.run for the Telegram
+  status probe). Now off-loaded with `asyncio.to_thread`. Fix applied at
+  both call-sites in `app/ui/interactive.py`.
+- `interactive` history menu — selecting "← back" raised
+  `ValueError: invalid literal for int() with base 10: '← back'` because
+  some questionary versions return the label when `value=None`. Now guarded
+  with `isinstance(qid, int)` check.
+- `app/ui/web.py:275` — unused f-string (ruff F541).
+
+
 ## [0.3.0] - 2026-05-24  —  cyber-pro: web dashboard + 7 modules + self-update
 
 ### Added — new OSINT modules (free; key-optional)
