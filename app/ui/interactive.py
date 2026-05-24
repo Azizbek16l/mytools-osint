@@ -985,10 +985,12 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
         kind = await questionary.select(
             "could not infer kind — pick one:",
             choices=[Choice(label, value=k) for k, label in KIND_LABELS.items()] +
-                    [Choice("← back", value=None)],
+                    [Choice("← back", value="__BACK__")],
             style=QSTYLE,
         ).ask_async()
-        if kind is None:
+        # Treat None, sentinel, or literal label as "back" — questionary
+        # version differences make value=None unreliable.
+        if kind is None or kind == "__BACK__" or kind == "← back":
             return True
     query = Query(kind=kind, value=value)
     hits, elapsed_ms = await run_query(db, query)
@@ -1538,13 +1540,13 @@ async def action_history(db: Database) -> None:
             f"found={row['found']:>3}/{row['total']:>3}",
             value=row["id"],
         ))
-    choices.append(Choice("← back", value=None))
+    choices.append(Choice("← back", value="__BACK__"))
     qid = await questionary.select(
         "recent (pick to view):", choices=choices, style=QSTYLE,
     ).ask_async()
-    # Some questionary versions return the LABEL when value=None — guard
-    # explicitly against "← back" instead of relying on None alone.
-    if qid is None or not isinstance(qid, int):
+    # Robust back-detection: questionary may return None, the sentinel string,
+    # or the literal label depending on the version installed.
+    if qid is None or qid == "__BACK__" or qid == "← back" or not isinstance(qid, int):
         return
     q = await db.get_query(qid)
     hits = await db.hits_for(qid)
@@ -1571,14 +1573,21 @@ async def action_modules() -> None:
     r = runner()
     await _render_modules_table(r)
     # Interactive toggle loop
+    _BACK_LABEL = "  ← back to main menu"
     while True:
         mods = r.all_modules()
+        # Use a sentinel string ("__BACK__") instead of None so questionary
+        # versions that echo the label still let us detect "back".
         choices = []
         for m in mods:
             mark = "●" if m.enabled else "○"
             label = f"  {mark}  {m.name:<18}  {'on' if m.enabled else 'off'}"
             choices.append(Choice(label, value=m.name))
-        choices.append(Choice("  ← back to main menu", value=None))
+        # Reload + refresh sub-action so users can hot-refresh the table.
+        choices.append(Choice("  ↻ refresh health view", value="__REFRESH__"))
+        choices.append(Choice("  ⊕ enable all",  value="__ENABLE_ALL__"))
+        choices.append(Choice("  ⊖ disable all", value="__DISABLE_ALL__"))
+        choices.append(Choice(_BACK_LABEL,       value="__BACK__"))
         pick = await questionary.select(
             "toggle a module:",
             choices=choices,
@@ -1586,8 +1595,22 @@ async def action_modules() -> None:
             qmark="",
             instruction="(↵ flip enabled/disabled  ·  ← back)",
         ).ask_async()
-        if pick is None:
+        # Robust back-detection: None (ctrl-C), the label string, or our sentinel.
+        if pick is None or pick == "__BACK__" or pick == _BACK_LABEL or "back to main" in (pick or ""):
             break
+        if pick == "__REFRESH__":
+            await _render_modules_table(r)
+            continue
+        if pick == "__ENABLE_ALL__":
+            for m in mods:
+                r.set_enabled(m.name, True)
+            console.print(f"[{tokens.OK}]✓ enabled all {len(mods)} modules[/]")
+            continue
+        if pick == "__DISABLE_ALL__":
+            for m in mods:
+                r.set_enabled(m.name, False)
+            console.print(f"[{tokens.WARN}]✓ disabled all {len(mods)} modules[/]")
+            continue
         # Toggle and refresh
         target = next((m for m in mods if m.name == pick), None)
         if target:

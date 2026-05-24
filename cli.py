@@ -500,12 +500,28 @@ class _Formatter(argparse.RawDescriptionHelpFormatter):
         super().__init__(*a, **kw)
 
 
+_SUBCOMMANDS_BLURB = """
+subcommands (run any of these in place of <value>):
+  config            settings wizard (Telegram + API keys + paths)
+  serve [--port N]  local web dashboard (http://127.0.0.1:8765)
+  self-update [--check]   pull latest binary, SHA-256 verify, in-place swap
+  opsec-check [--opsec]   verify OPSEC mode is leak-free
+  cert-watch <pat>  live tail Certificate Transparency for matches of <pat>
+  cache stats|clear|clear-expired       SQLite HTTP cache control
+  completion bash|zsh                   emit shell completion script
+  mcp               start MCP server over stdio (Claude / Cursor)
+  watch add|list|remove|enable|disable|run        watchlist daemon
+  diff <kind> <value> [--from ID --to ID]         diff two stored scans
+"""
+
+
 def _build_parser() -> argparse.ArgumentParser:
+    examples = __doc__.split("Examples:", 1)[1] if __doc__ and "Examples:" in __doc__ else ""
     ap = argparse.ArgumentParser(
         prog="osint",
         description=f"mytools-osint — personal OSINT lookups by {BRAND} (free APIs, no paid keys)",
         formatter_class=_Formatter,
-        epilog=__doc__.split("Examples:", 1)[1] if __doc__ and "Examples:" in __doc__ else None,
+        epilog=_SUBCOMMANDS_BLURB + (examples or ""),
     )
     ap.add_argument("value", nargs="?", help="username, email, +phone, @tg, domain or IP")
     ap.add_argument("--kind", choices=[k.value for k in QueryKind], default=None,
@@ -855,7 +871,8 @@ def main(argv: list[str] | None = None) -> int:
     st = Style(enabled=not _no_color_requested(args))
 
     if args.version:
-        print(render_banner(st))
+        if not args.no_banner:
+            print(render_banner(st))
         print(f"  {st.bold('mytools-osint')} v{_ver}")
         return 0
 
