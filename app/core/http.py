@@ -38,25 +38,69 @@ def _ua() -> str:
         )
 
 
+class _CacheTransport(httpx.AsyncBaseTransport):
+    """Wrap a base transport with the SQLite cache.
+
+    GET responses inside the cache TTL skip the wire entirely; everything else
+    passes through. Errors in the cache layer never block the real request.
+    """
+
+    def __init__(self, inner: httpx.AsyncBaseTransport):
+        self._inner = inner
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        # Local import to avoid circular at module load
+        from app.core import cache as _cache
+        url = str(request.url)
+        if request.method == "GET" and _cache.is_enabled():
+            try:
+                cached = await _cache.get("GET", url)
+            except Exception:
+                cached = None
+            if cached is not None:
+                return httpx.Response(
+                    status_code=cached["status"],
+                    headers=cached["headers"],
+                    content=cached["body"],
+                    request=request,
+                )
+        resp = await self._inner.handle_async_request(request)
+        if request.method == "GET" and 200 <= resp.status_code < 400 and _cache.is_enabled():
+            try:
+                # Read body so we can cache it; httpx caches on the response.
+                await resp.aread()
+                await _cache.put("GET", url, resp.status_code,
+                                 dict(resp.headers), resp.content)
+            except Exception:
+                pass
+        return resp
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+
+
 def _build_transport() -> httpx.AsyncBaseTransport | None:
-    """Return a SOCKS-aware transport when OPSEC is on, else None (httpx default)."""
-    if not _opsec_on():
-        return None
-    proxy = os.getenv("HTTPX_PROXY") or os.getenv("TOR_SOCKS") or "socks5://127.0.0.1:9050"
-    # Force socks5h:// so DNS resolves through Tor — avoid leaks.
-    if proxy.startswith("socks5://"):
-        proxy = "socks5h://" + proxy[len("socks5://"):]
-    try:
-        # Prefer httpx-socks if installed; fall back to httpx's built-in proxy.
-        from httpx_socks import AsyncProxyTransport
-        return AsyncProxyTransport.from_url(proxy)
-    except ImportError:
-        # httpx 0.27+ supports proxy= directly on AsyncClient (HTTP CONNECT
-        # for socks5 only via httpx-socks). If unavailable, fall back to env
-        # so the user sees an error rather than a silent leak.
-        os.environ["HTTPS_PROXY"] = proxy
-        os.environ["HTTP_PROXY"] = proxy
-        return None
+    """Return a transport stack: optional SOCKS + optional cache wrapper."""
+    # Start with the SOCKS-aware transport when OPSEC is on, else the default
+    # HTTP transport. Then wrap with cache when OSINT_CACHE is on.
+    base: httpx.AsyncBaseTransport | None = None
+    if _opsec_on():
+        proxy = os.getenv("HTTPX_PROXY") or os.getenv("TOR_SOCKS") or "socks5://127.0.0.1:9050"
+        if proxy.startswith("socks5://"):
+            proxy = "socks5h://" + proxy[len("socks5://"):]
+        try:
+            from httpx_socks import AsyncProxyTransport
+            base = AsyncProxyTransport.from_url(proxy)
+        except ImportError:
+            os.environ["HTTPS_PROXY"] = proxy
+            os.environ["HTTP_PROXY"] = proxy
+    # Wrap base with cache transport if OSINT_CACHE is on.
+    from app.core import cache as _cache
+    if _cache.is_enabled():
+        if base is None:
+            base = httpx.AsyncHTTPTransport(http2=True)
+        return _CacheTransport(base)
+    return base
 
 
 async def get_client() -> httpx.AsyncClient:
