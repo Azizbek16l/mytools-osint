@@ -1,7 +1,7 @@
-"""Nuitka one-file Windows build for mytools-osint.
+"""Nuitka one-file build for the mytools-osint GUI (PySide6).
 
 Run with: python scripts/build_exe.py
-Output:   dist/mytools-osint.exe (≈70-95 MB single-file, no Python install needed)
+Output:   dist/mytools-osint(.exe on Windows)  ~70-95 MB single-file
 
 First build takes ~5-10 min as Nuitka compiles. Subsequent builds reuse the cache.
 """
@@ -15,6 +15,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY = ROOT / "main.py"
 OUT = ROOT / "dist"
+sys.path.insert(0, str(ROOT))
+
+try:
+    from app import __version__ as VERSION
+except Exception:
+    VERSION = "0.0.0"
+
+# See build_cli.py for rationale — must match release.yml `cp dist/mytools-osint${ext}`.
+FILENAME = "mytools-osint.exe" if sys.platform == "win32" else "mytools-osint"
 
 
 def main() -> int:
@@ -35,10 +44,10 @@ def main() -> int:
         "--windows-console-mode=disable",
         "--company-name=MarsIT",
         "--product-name=mytools-osint",
-        "--file-version=0.1.0",
-        "--product-version=0.1.0",
+        f"--file-version={VERSION}",
+        f"--product-version={VERSION}",
         "--output-dir=" + str(OUT),
-        "--output-filename=mytools-osint.exe",
+        "--output-filename=" + FILENAME,
         "--remove-output",
         "--assume-yes-for-downloads",
         str(ENTRY),
