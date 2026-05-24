@@ -7,8 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-windows%20%7C%20macOS%20%7C%20linux-lightgrey)
-[![tests](https://img.shields.io/badge/tests-193%20passing-brightgreen)](#)
-[![modules](https://img.shields.io/badge/modules-24-blue)](#)
+[![tests](https://img.shields.io/badge/tests-204%20passing-brightgreen)](#)
+[![modules](https://img.shields.io/badge/modules-31-blue)](#)
 [![GitHub release](https://img.shields.io/github/v/release/Azizbek16l/mytools-osint?sort=semver)](https://github.com/Azizbek16l/mytools-osint/releases/latest)
 
 ---
@@ -28,9 +28,34 @@ Given one input — a username, email, phone, Telegram handle, domain, or IP —
 
 **No paid APIs are required.** Optional keys (HIBP / Numverify / IPinfo / LeakCheck / GitHub PAT / abuse.ch / AbuseIPDB) unlock higher quotas but the tool degrades gracefully.
 
+## What's new in 0.3 — cyber-pro: web dashboard + 7 modules + self-update
+
+`mytools-osint` 0.3 adds **7 more modules** + a local **web dashboard** +
+**Markdown reports** + an **`osint self-update`** path that pulls the
+latest binary, verifies SHA-256, and swaps it in place.
+
+```bash
+osint serve                                  # local web UI at http://127.0.0.1:8765
+osint github.com --profile leak-hunt --md leaks.md
+osint 'P@ssw0rd!' --kind password            # HIBP k-anon (value never leaves host)
+osint 5d41402abc4b2a76b9719d911017c592 --kind hash      # MalwareBazaar IOC lookup
+osint mycorp.com --profile red-team --html report.html  # all 24 red-team modules
+osint self-update                            # update in place, SHA-256 verified
+```
+
+| Module          | Use case                                                  |
+|-----------------|-----------------------------------------------------------|
+| `github_leaks`  | GitHub code+commit+user search for org/email mentions     |
+| `cloud_buckets` | S3 + Azure + GCS + B2 + DO bucket enum (anonymous-list = CRITICAL) |
+| `hibp_passwords`| Pwned-Passwords k-anonymity (password never leaves host)  |
+| `malware_bazaar`| abuse.ch hash IOC lookup (md5/sha1/sha256)                |
+| `web_hardening` | CORS + cookies + robots/sitemap + HTTP methods            |
+| `well_known`    | `/.well-known/*` discovery (24 paths: oidc · saml · …)    |
+| `subdomain_brute` | passive DNS brute on 280 curated subdomain names        |
+
 ## What's new in 0.2 — red-team boost
 
-`mytools-osint` 0.2 adds **8 modules** purpose-built for security engineers,
+`mytools-osint` 0.2 added **8 modules** purpose-built for security engineers,
 red teams, and IOC analysts — all free, all key-optional. Plus profile
 presets, a HTML pivot report, a live Textual dashboard, and an OPSEC mode
 that tunnels every request through Tor.
