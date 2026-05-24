@@ -817,6 +817,9 @@ def main(argv: list[str] | None = None) -> int:
     if raw and raw[0] in ("cert-watch", "certwatch"):
         from app.features.cert_watch import cmd_cert_watch
         return cmd_cert_watch(raw[1:])
+    if raw and raw[0] == "cache":
+        from app.core.cache import cmd_cache
+        return cmd_cache(raw[1:])
     if raw and raw[0] == "serve":
         from app.ui.web import serve as _serve
         port = 8765

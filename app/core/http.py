@@ -113,7 +113,26 @@ async def request(
     backoff: float = 0.4,
     **kwargs: Any,
 ) -> httpx.Response | None:
-    """One-shot request with light retry. Returns None on terminal failure."""
+    """One-shot request with light retry. Returns None on terminal failure.
+
+    GET requests are served from the SQLite HTTP cache when OSINT_CACHE=1.
+    """
+    # Cache lookup (GET only, when enabled)
+    if method.upper() == "GET":
+        try:
+            from app.core import cache as _cache
+            if _cache.is_enabled():
+                cached = await _cache.get(method, url)
+                if cached is not None:
+                    return httpx.Response(
+                        status_code=cached["status"],
+                        headers=cached["headers"],
+                        content=cached["body"],
+                        request=httpx.Request(method, url),
+                    )
+        except Exception:
+            pass
+
     client = await get_client()
     last_exc: Exception | None = None
     for attempt in range(retries + 1):
@@ -128,6 +147,15 @@ async def request(
             if resp.status_code >= 500 and attempt < retries:
                 await asyncio.sleep(backoff * (2**attempt) + random.uniform(0, 0.2))
                 continue
+            # Cache successful GET responses
+            if method.upper() == "GET" and 200 <= resp.status_code < 400:
+                try:
+                    from app.core import cache as _cache
+                    if _cache.is_enabled():
+                        await _cache.put(method, url, resp.status_code,
+                                         dict(resp.headers), resp.content)
+                except Exception:
+                    pass
             return resp
         except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as e:
             last_exc = e
