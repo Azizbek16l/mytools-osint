@@ -933,9 +933,12 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
             await action_stats()
             return await action_lookup(db)
         if action.action == "settings":
+            # See above — cmd_wizard internally calls asyncio.run, so we
+            # off-load it to a worker thread to avoid loop nesting.
+            import asyncio as _asyncio
             from app.ui.config_cli import cmd_wizard
             try:
-                cmd_wizard()
+                await _asyncio.to_thread(cmd_wizard)
             except Exception as e:
                 console.print(f"[{tokens.BAD}]settings wizard error:[/] {e}")
             return await action_lookup(db)
@@ -1539,10 +1542,12 @@ async def action_history(db: Database) -> None:
     qid = await questionary.select(
         "recent (pick to view):", choices=choices, style=QSTYLE,
     ).ask_async()
-    if not qid:
+    # Some questionary versions return the LABEL when value=None — guard
+    # explicitly against "← back" instead of relying on None alone.
+    if qid is None or not isinstance(qid, int):
         return
-    q = await db.get_query(int(qid))
-    hits = await db.hits_for(int(qid))
+    q = await db.get_query(qid)
+    hits = await db.hits_for(qid)
     if q is None:
         console.print(f"[{tokens.BAD}]query not found[/]")
         return
@@ -1846,12 +1851,16 @@ async def run_interactive(show_figlet: bool = False) -> int:
             elif choice == "stats":
                 await action_stats()
             elif choice == "settings":
-                # Open the FULL settings wizard (set/unset/Telegram/edit) — not
-                # just a read-only overview. Runs in this loop so it doesn't
-                # quit the shell when done.
+                # cmd_wizard() is sync + internally calls asyncio.run() for
+                # the Telegram-status check. Running it inline here would
+                # fail with "cannot be called from a running event loop"
+                # because the interactive shell *is* an asyncio loop.
+                # Punt it into a worker thread so the inner asyncio.run gets
+                # its own loop and our outer loop stays clean.
+                import asyncio as _asyncio
                 from app.ui.config_cli import cmd_wizard
                 try:
-                    cmd_wizard()
+                    await _asyncio.to_thread(cmd_wizard)
                 except Exception as e:
                     console.print(f"[{tokens.BAD}]settings wizard error:[/] {e}")
     except (KeyboardInterrupt, EOFError):

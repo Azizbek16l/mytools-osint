@@ -272,7 +272,7 @@ async def _run_server(port: int) -> None:
     addr = server.sockets[0].getsockname()
     url = f"http://{addr[0]}:{addr[1]}/"
     print(f"  mytools-osint web dashboard → {url}")
-    print(f"  press Ctrl-C to stop\n")
+    print("  press Ctrl-C to stop\n")
     async with server:
         await server.serve_forever()
 
