@@ -1,0 +1,51 @@
+#compdef osint
+# zsh completion for `osint`.
+# Install:
+#   source <(osint completion zsh)          # ad-hoc
+#   osint completion zsh > /usr/local/share/zsh/site-functions/_osint    # system-wide
+#   compinit
+local -a subs flags kinds formats severities profiles
+subs=(
+  'config:settings wizard (telegram + API keys)'
+  'mcp:start MCP server (Claude/Cursor)'
+  'watch:add/list/run watchlist entries'
+  'diff:compare two scans of the same target'
+  'self-update:pull latest binary + SHA-256 verify + swap'
+  'opsec-check:verify --opsec is leak-free (Tor + UA + jitter)'
+  'cert-watch:live tail Certificate Transparency for a pattern'
+  'cache:HTTP cache stats / clear'
+  'serve:local web dashboard'
+  'completion:emit shell completion script'
+)
+flags=(
+  '--kind[force the query kind]:kind:(username email phone telegram whatsapp ip domain password hash)'
+  '--profile[module preset]:profile:(quick deep person domain-recon red-team blue-team ioc creds leak-hunt default all)'
+  '--format[output format]:format:(plain json jsonl csv)'
+  '--min-severity[severity floor]:sev:(info low medium high critical)'
+  '--bulk-format[bulk output]:format:(plain jsonl)'
+  '--bulk[targets file]:_files'
+  '--out[output file]:_files'
+  '--html[HTML report file]:_files'
+  '--md[Markdown report file]:_files'
+  '--all[show every probe (incl. negatives)]'
+  '--no-color[disable ANSI colour]'
+  '--no-banner[suppress startup banner]'
+  '--list-modules[list registered modules]'
+  '--list-stats[show site dataset breakdown]'
+  '--list-profiles[list profile presets]'
+  '--version[print banner + version]'
+  '--interactive[launch interactive menu]'
+  '--debug[show per-source diagnostics]'
+  '--opsec[SOCKS5 + jitter + UA rotation]'
+  '--tui[live Textual dashboard]'
+  '--enable[force-enable a module]:module'
+  '--disable[force-disable a module]:module'
+  '--help[show help]'
+)
+
+if (( CURRENT == 2 )); then
+  _describe 'subcommands' subs
+  _arguments $flags
+else
+  _arguments $flags
+fi

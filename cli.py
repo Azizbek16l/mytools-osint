@@ -820,6 +820,28 @@ def main(argv: list[str] | None = None) -> int:
     if raw and raw[0] == "cache":
         from app.core.cache import cmd_cache
         return cmd_cache(raw[1:])
+    if raw and raw[0] == "completion":
+        shell = raw[1] if len(raw) > 1 else "bash"
+        # Try filesystem path first (dev), then importlib resources (installed wheel).
+        cand_paths = []
+        here = Path(__file__).resolve().parent
+        if shell == "bash":
+            cand_paths.append(here / "scripts" / "completions" / "osint.bash")
+        elif shell == "zsh":
+            cand_paths.append(here / "scripts" / "completions" / "_osint")
+        elif shell == "fish":
+            print("# fish completion coming soon — for now, copy zsh script.",
+                  file=sys.stderr)
+            return 1
+        else:
+            print(f"unknown shell {shell!r}; valid: bash, zsh, fish", file=sys.stderr)
+            return 2
+        for p in cand_paths:
+            if p.exists():
+                print(p.read_text(encoding="utf-8"))
+                return 0
+        print(f"completion script not found for {shell!r}", file=sys.stderr)
+        return 1
     if raw and raw[0] == "serve":
         from app.ui.web import serve as _serve
         port = 8765

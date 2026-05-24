@@ -84,6 +84,7 @@ packages = ["app"]
 "cli.py" = "cli.py"
 "main.py" = "main.py"
 "data" = "data"
+"scripts/completions" = "scripts/completions"
 
 [tool.hatch.build.targets.sdist]
 include = [
