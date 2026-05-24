@@ -23,7 +23,36 @@ Given one input — a username, email, phone, Telegram handle, domain, or IP —
 - **Discovery** → Wayback Machine snapshots, GitHub public user/code search, ready-to-click Google Dorks
 - **Patterns** → username variations + email-format guesses (offline)
 
-**No paid APIs are required.** Optional keys (HIBP / Numverify / IPinfo / LeakCheck / GitHub PAT) unlock higher quotas but the tool degrades gracefully.
+**No paid APIs are required.** Optional keys (HIBP / Numverify / IPinfo / LeakCheck / GitHub PAT / abuse.ch / AbuseIPDB) unlock higher quotas but the tool degrades gracefully.
+
+## What's new in 0.2 — red-team boost
+
+`mytools-osint` 0.2 adds **8 modules** purpose-built for security engineers,
+red teams, and IOC analysts — all free, all key-optional. Plus profile
+presets, a HTML pivot report, a live Textual dashboard, and an OPSEC mode
+that tunnels every request through Tor.
+
+```bash
+osint --profile red-team example.com --html report.html
+osint --profile ioc 198.51.100.42 --jsonl                    # pipe-friendly
+osint --bulk targets.txt --profile domain-recon              # bulk mode
+osint --tui example.com                                      # live dashboard
+osint example.com --opsec                                    # SOCKS5 + jitter
+```
+
+| Module          | What it does                                              | Free? |
+|-----------------|-----------------------------------------------------------|-------|
+| `internetdb`    | Shodan InternetDB → ports + CVEs + tags per IP            | yes, no key |
+| `threat_intel`  | URLhaus + ThreatFox + PhishTank malware/phishing IOCs     | yes, optional `ABUSE_CH_API_KEY` |
+| `takeover`      | Subdomain takeover detector (20 service fingerprints)     | yes |
+| `web_recon`     | JS secret scanner + Wayback `.env/.git/admin` goldmine + favicon mmh3 | yes |
+| `email_security`| SPF + DMARC + DKIM + MTA-STS, A-F graded                  | yes |
+| `typosquat`     | qwerty + homoglyph + bitsquat + TLD-swap generator + DNS check | yes |
+| `pgp_keys`      | keys.openpgp.org + Ubuntu keyserver lookups               | yes |
+| `tor_check`     | onionoo → is this IP a Tor relay / exit?                  | yes |
+
+Profile presets: `quick · deep · person · domain-recon · red-team · blue-team · ioc`.
+List them with `osint --list-profiles`.
 
 ## Install
 

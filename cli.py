@@ -286,11 +286,42 @@ def _print_stats(st: Style, sink) -> None:
 
 # ---- main loop --------------------------------------------------------------
 
+_SEV_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def _hit_meets_severity(h: Hit, threshold: str | None) -> bool:
+    if not threshold:
+        return True
+    return _SEV_RANK.get(h.severity.value, 0) >= _SEV_RANK.get(threshold, 0)
+
+
+def _hit_to_jsonl(h: Hit, q: Query) -> str:
+    payload = {
+        "ts": h.found_at.isoformat() if h.found_at else None,
+        "kind": q.kind.value,
+        "target": q.value,
+        "module": h.module,
+        "source": h.source,
+        "category": h.category,
+        "status": h.status.value,
+        "severity": h.severity.value,
+        "title": h.title,
+        "detail": h.detail,
+        "url": h.url,
+        "latency_ms": h.latency_ms,
+        "extra": h.extra,
+    }
+    return json.dumps(payload, default=str, ensure_ascii=False)
+
+
 async def _stream_run(q: Query, args: argparse.Namespace, st: Style, sink) -> int:
     r = runner()
     hits: list[Hit] = []
+    min_sev = getattr(args, "min_severity", None)
 
     def visible(h: Hit) -> bool:
+        if not _hit_meets_severity(h, min_sev):
+            return False
         if args.debug:
             return True                                       # show everything
         if args.all:
@@ -307,10 +338,19 @@ async def _stream_run(q: Query, args: argparse.Namespace, st: Style, sink) -> in
         hits.append(h)
         if args.format == "plain" and visible(h):
             url = h.url or ""
-            line = f"  [{_color_for(h.status, st)}] {h.module:14} {h.source:30} {h.detail[:90]}"
+            sev_badge = ""
+            if h.severity.value in ("high", "critical"):
+                sev_badge = st.bad(f"[{h.severity.value.upper()}] ")
+            elif h.severity.value == "medium":
+                sev_badge = st.warn("[MED] ")
+            line = (f"  [{_color_for(h.status, st)}] {h.module:14} "
+                    f"{h.source:30} {sev_badge}{h.detail[:90]}")
             print(line, file=sink, flush=True)
             if url:
                 print(f"        {st.blue(url)}", file=sink, flush=True)
+        elif args.format == "jsonl":
+            if visible(h):
+                print(_hit_to_jsonl(h, q), file=sink, flush=True)
 
     if args.format == "plain":
         _query_header(q, st, sink)
@@ -336,7 +376,96 @@ async def _stream_run(q: Query, args: argparse.Namespace, st: Style, sink) -> in
             writer.writerow([h.module, h.source, h.category, h.status.value,
                              h.title, h.detail, h.url, h.severity.value, h.latency_ms])
 
+    # If --html, write a report regardless of stream format.
+    if getattr(args, "html", None):
+        try:
+            from app.ui.html_report import render_report
+            html = render_report(q, result, elapsed_ms)
+            # Sync I/O inside async — fine for a one-shot file write.
+            await asyncio.to_thread(Path(args.html).write_text, html,
+                                    encoding="utf-8")
+            print(st.dim(f"  html report → {args.html}"), file=sys.stderr)
+        except Exception as e:
+            print(st.bad(f"  html report failed: {e}"), file=sys.stderr)
+
     return 0 if result.found > 0 else 1
+
+
+def _run_bulk(args: argparse.Namespace, st: Style) -> int:
+    """Sequential bulk mode — one target per line in args.bulk file.
+
+    Output is jsonl by default (machine-readable, easy to grep into).
+    Switches to plain if --bulk-format=plain.
+
+    Profile/enable/disable apply to every target. A failing target never
+    aborts the loop; it gets one '{...,"error":...}' jsonl line.
+    """
+    targets: list[str] = []
+    src = Path(args.bulk)
+    if not src.exists():
+        print(st.bad(f"  bulk file not found: {args.bulk}"), file=sys.stderr)
+        return 2
+    for raw in src.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        targets.append(line)
+    if not targets:
+        print(st.bad("  bulk file is empty"), file=sys.stderr)
+        return 2
+
+    load_settings()
+    r = runner()
+    if args.profile:
+        from app.core.profiles import apply_profile
+        try:
+            apply_profile(r, args.profile)
+        except ValueError as e:
+            print(st.bad(f"  {e}"), file=sys.stderr); return 2
+    for m in args.enable:
+        r.set_enabled(m, True)
+    for m in args.disable:
+        r.set_enabled(m, False)
+
+    sink = sys.stdout
+    if args.out:
+        sink = open(args.out, "w", encoding="utf-8", newline="")
+
+    async def _one(target: str) -> int:
+        kind = QueryKind(args.kind) if args.kind else infer_kind(target)
+        q = Query(kind=kind, value=target)
+        # Force jsonl per-hit output for bulk plain too — keeps it grep-able.
+        local_args = argparse.Namespace(**vars(args))
+        local_args.format = "plain" if args.bulk_format == "plain" else "jsonl"
+        local_args.html = None
+        local_args.tui = False
+        if args.bulk_format == "plain":
+            print(st.dim(f"\n  ─── {kind.value}: {target} ───"), file=sink, flush=True)
+        try:
+            return await _stream_run(q, local_args, st, sink)
+        except Exception as e:
+            print(json.dumps({"target": target, "error": f"{type(e).__name__}: {e}"}),
+                  file=sink, flush=True)
+            return 1
+
+    try:
+        try:
+            n_found = 0
+            for t in targets:
+                rc = asyncio.run(_one(t))
+                if rc == 0:
+                    n_found += 1
+            print(st.dim(f"\n  bulk done: {n_found}/{len(targets)} with positives"),
+                  file=sys.stderr)
+            return 0 if n_found else 1
+        finally:
+            try:
+                asyncio.run(close_client())
+            except Exception:
+                pass
+    finally:
+        if args.out:
+            sink.close()
 
 
 def _no_color_requested(args: argparse.Namespace) -> bool:
@@ -370,8 +499,8 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="force the query kind (auto-detect otherwise)")
     ap.add_argument("--all", action="store_true",
                     help="show every probe (default: only positives + rate-limited + breach)")
-    ap.add_argument("--format", choices=["plain", "json", "csv"], default="plain",
-                    help="output format")
+    ap.add_argument("--format", choices=["plain", "json", "jsonl", "csv"], default="plain",
+                    help="output format (jsonl = one Hit per line, ideal for piping)")
     ap.add_argument("--out", default=None, help="write output to FILE instead of stdout")
     ap.add_argument("--no-color", action="store_true", help="disable ANSI colour")
     ap.add_argument("--no-banner", action="store_true", help="suppress the startup banner")
@@ -379,6 +508,8 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="list all registered OSINT modules and exit")
     ap.add_argument("--list-stats", action="store_true",
                     help="show site dataset breakdown by category and exit")
+    ap.add_argument("--list-profiles", action="store_true",
+                    help="list available --profile presets and exit")
     ap.add_argument("--version", action="store_true",
                     help="print banner + version and exit")
     ap.add_argument("--interactive", "-i", action="store_true",
@@ -389,6 +520,29 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="emit one Hit per (subdomain, source) instead of deduplicated rows")
     ap.add_argument("--banner", action="store_true",
                     help="show the full BLUETM.UZ figlet banner (default: compact one-liner)")
+    # --- red-team additions ---------------------------------------------
+    ap.add_argument("--profile",
+                    help="module preset: quick | deep | person | domain-recon | "
+                         "red-team | blue-team | ioc (default: all enabled)")
+    ap.add_argument("--enable", action="append", default=[], metavar="MOD",
+                    help="force-enable a specific module (repeatable)")
+    ap.add_argument("--disable", action="append", default=[], metavar="MOD",
+                    help="force-disable a specific module (repeatable)")
+    ap.add_argument("--min-severity", default=None,
+                    choices=["info", "low", "medium", "high", "critical"],
+                    help="only surface hits at or above this severity")
+    ap.add_argument("--bulk", default=None, metavar="FILE",
+                    help="read targets from FILE (one per line, '#' = comment); "
+                         "run them sequentially")
+    ap.add_argument("--bulk-format", choices=["plain", "jsonl"], default="jsonl",
+                    help="output format when --bulk is set (default: jsonl)")
+    ap.add_argument("--opsec", action="store_true",
+                    help="route HTTP via SOCKS5 (TOR_SOCKS env or 127.0.0.1:9050), "
+                         "add jitter, force-randomize UA")
+    ap.add_argument("--tui", action="store_true",
+                    help="launch the live Textual dashboard for this query")
+    ap.add_argument("--html", default=None, metavar="FILE",
+                    help="write a self-contained HTML report to FILE")
     return ap
 
 
@@ -658,6 +812,37 @@ def main(argv: list[str] | None = None) -> int:
         _print_stats(st, sys.stdout)
         return 0
 
+    if args.list_profiles:
+        from app.core.profiles import list_profiles
+        if not args.no_banner:
+            print(render_banner(st))
+        print()
+        print(f"   {st.accent(st.bold('profiles'))}  "
+              f"{st.dim('— enable a curated module subset via --profile NAME')}")
+        print()
+        for name, n, mods in list_profiles():
+            print(f"   {st.bold(f'{name:<14}')} {st.dim(f'({n:>2} modules)')}  "
+                  f"{', '.join(mods[:6])}"
+                  + (st.dim(f' … (+{len(mods)-6})') if len(mods) > 6 else ""))
+        print()
+        return 0
+
+    # OPSEC mode: bootstrap the SOCKS-routed HTTP client BEFORE any module
+    # creates the default singleton. We do this by setting env vars that
+    # app.core.http honours on first call.
+    if args.opsec:
+        os.environ.setdefault("OSINT_OPSEC", "1")
+        socks = os.getenv("TOR_SOCKS", "socks5://127.0.0.1:9050")
+        os.environ["HTTPX_PROXY"] = socks
+        if not args.no_banner:
+            print(render_banner(st))
+        print(st.warn(f"  ⚑ OPSEC MODE — SOCKS5 {socks}, "
+                      f"jitter ON, UA randomization forced"), file=sys.stderr)
+
+    # Bulk mode short-circuits the single-query path.
+    if args.bulk:
+        return _run_bulk(args, st)
+
     if args.interactive or (not args.value and sys.stdin.isatty()):
         from app.ui.interactive import run_interactive
         load_settings()
@@ -671,6 +856,33 @@ def main(argv: list[str] | None = None) -> int:
     load_settings()
     kind = QueryKind(args.kind) if args.kind else infer_kind(args.value)
     q = Query(kind=kind, value=args.value)
+
+    # Apply profile + per-module enable/disable (profile first so flags win).
+    r = runner()
+    if args.profile:
+        from app.core.profiles import apply_profile
+        try:
+            enabled, disabled = apply_profile(r, args.profile)
+            print(st.dim(f"  profile={args.profile} → "
+                         f"{len(enabled)} enabled, {len(disabled)} disabled"),
+                  file=sys.stderr)
+        except ValueError as e:
+            print(st.bad(f"  {e}"), file=sys.stderr)
+            return 2
+    for m in args.enable:
+        r.set_enabled(m, True)
+    for m in args.disable:
+        r.set_enabled(m, False)
+
+    # TUI mode: hand off to the textual app and skip the streaming printer.
+    if args.tui:
+        try:
+            from app.ui.tui_dashboard import run_tui
+            return run_tui(q, html_out=getattr(args, "html", None))
+        except ImportError as e:
+            print(st.bad(f"  TUI requires 'textual' — pip install textual\n  ({e})"),
+                  file=sys.stderr)
+            return 2
 
     sink_ctx: io.TextIOBase
     if args.out:
