@@ -40,13 +40,26 @@ def _platform_asset() -> str | None:
 
 
 def _fetch(url: str, dest: Path | None = None) -> bytes | None:
+    # GitHub's REST API requires application/vnd.github+json for the
+    # /releases/* endpoints; release-asset downloads need octet-stream.
+    accept = ("application/vnd.github+json"
+              if "api.github.com" in url else "application/octet-stream")
     req = urllib.request.Request(
         url,
         headers={"User-Agent": f"mytools-osint/{CURRENT_VERSION}",
-                 "Accept": "application/octet-stream"},
+                 "Accept": accept,
+                 "X-GitHub-Api-Version": "2022-11-28"},
     )
+    # Prefer certifi's CA bundle — stdlib SSL fails on Python.framework
+    # builds (macOS) and on systems where the OS trust store isn't wired up.
+    import ssl
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        import certifi
+        ctx: ssl.SSLContext | None = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ctx = None
+    try:
+        with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
             data = resp.read()
             if dest:
                 dest.write_bytes(data)

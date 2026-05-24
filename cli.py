@@ -813,6 +813,52 @@ def main(argv: list[str] | None = None) -> int:
                 pass
     from app import __version__ as _ver
     raw = list(sys.argv[1:] if argv is None else argv)
+    # Universal sub-command --help / -h handling: print usage, return 0.
+    # Each entry: command-name → one-line summary + multi-line help body.
+    _SUB_HELP: dict[str, tuple[str, str]] = {
+        "self-update": ("pull latest release binary in place (SHA-256 verified)",
+            "usage: osint self-update [--check]\n"
+            "  --check   compare versions without downloading\n"
+            "  detects pipx / brew / scoop installs and routes you to the\n"
+            "  right package-manager command instead of replacing the binary."),
+        "opsec-check": ("verify --opsec is leak-free (Tor exit + UA + jitter)",
+            "usage: osint opsec-check [--opsec]\n"
+            "  --opsec   enable OPSEC mode for the duration of the check\n"
+            "  probes: egress IP, Tor-exit-status, UA rotation across 5 calls,\n"
+            "  jitter stdev across 5 calls. Non-zero exit if any check fails\n"
+            "  while OPSEC is on."),
+        "cache": ("SQLite HTTP cache control",
+            "usage: osint cache [stats|clear|clear-expired]\n"
+            "  enable with `OSINT_CACHE=1`. per-source TTL (see app/core/cache.py)."),
+        "serve": ("local web dashboard with live SSE results",
+            "usage: osint serve [--port N]\n"
+            "  starts an http://127.0.0.1:N dashboard (default port 8765).\n"
+            "  zero extra deps — stdlib asyncio + Server-Sent Events."),
+        "completion": ("emit shell completion script",
+            "usage: osint completion <bash|zsh|fish>\n"
+            "  install:\n"
+            "    bash:  osint completion bash > /etc/bash_completion.d/osint\n"
+            "    zsh:   osint completion zsh > ~/.zsh/completions/_osint && compinit"),
+        "cert-watch": ("live tail Certificate Transparency for a pattern",
+            "usage: osint cert-watch <pattern> [--max N]\n"
+            "  <pattern>: case-insensitive substring (e.g. 'acme')\n"
+            "  --max N:   exit after N matching certs (default: keep going)"),
+        "config": ("settings wizard (Telegram + API keys + paths)",
+            "usage: osint config [wizard|show|edit|telegram|set KEY VAL|unset KEY]"),
+        "watch": ("watchlist daemon — re-scan + Telegram-notify on diff",
+            "usage: osint watch [add|list|remove|enable|disable|run] ..."),
+        "diff": ("diff two stored scans of the same target",
+            "usage: osint diff <kind> <value> [--from ID --to ID]"),
+        "mcp": ("start MCP server over stdio (Claude / Cursor)",
+            "usage: osint mcp\n"
+            "  wire into your AI agent's mcp.json — see agent/mcp.json for an example."),
+    }
+    if raw and raw[0] in _SUB_HELP and len(raw) > 1 and raw[1] in ("-h", "--help"):
+        summary, body = _SUB_HELP[raw[0]]
+        print(f"  {raw[0]} — {summary}\n")
+        print(body)
+        return 0
+
     if raw and raw[0] == "config":
         return _handle_config_subcommand(raw[1:])
     if raw and raw[0] == "mcp":
