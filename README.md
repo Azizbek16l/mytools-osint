@@ -3,10 +3,13 @@
 > Personal OSINT toolkit — CLI + GUI. Free APIs, no paid keys.
 > Username · email · phone · Telegram · domain · IP · breach · subdomain · cert · headers.
 
-[![CI](https://github.com/Azizbek16l/mytools-osint/actions/workflows/release.yml/badge.svg)](https://github.com/Azizbek16l/mytools-osint/actions/workflows/release.yml)
+[![release](https://github.com/Azizbek16l/mytools-osint/actions/workflows/release.yml/badge.svg)](https://github.com/Azizbek16l/mytools-osint/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-windows%20%7C%20macOS%20%7C%20linux-lightgrey)
+[![tests](https://img.shields.io/badge/tests-193%20passing-brightgreen)](#)
+[![modules](https://img.shields.io/badge/modules-24-blue)](#)
+[![GitHub release](https://img.shields.io/github/v/release/Azizbek16l/mytools-osint?sort=semver)](https://github.com/Azizbek16l/mytools-osint/releases/latest)
 
 ---
 
