@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import UTC, datetime
 
+from app.core.attack import tids_for
 from app.core.types import HitStatus, Query, QueryResult, Severity
 
 _SEV_ORDER = {Severity.CRITICAL: 0, Severity.HIGH: 1, Severity.MEDIUM: 2,
@@ -76,7 +77,15 @@ def render_markdown(query: Query, result: QueryResult, elapsed_ms: int) -> str:
                               key=lambda kv: -sum(1 for h in kv[1] if h.status == HitStatus.FOUND)):
         items_sorted = sorted(items, key=lambda h: (_SEV_ORDER.get(h.severity, 5), h.source))
         n_pos = sum(1 for h in items if h.status == HitStatus.FOUND)
-        out.append(f"### `{mod}` — {n_pos} found / {len(items)} probed")
+        tids = tids_for(mod)
+        tid_str = ""
+        if tids:
+            tid_links = " · ".join(
+                f"[{t}](https://attack.mitre.org/techniques/{t.replace('.', '/')}/)"
+                for t in tids
+            )
+            tid_str = f"  *— ATT&CK: {tid_links}*"
+        out.append(f"### `{mod}` — {n_pos} found / {len(items)} probed{tid_str}")
         out.append("")
         out.append("| Sev | Status | Source | Detail | URL |")
         out.append("|---|---|---|---|---|")

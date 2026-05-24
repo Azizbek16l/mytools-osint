@@ -808,6 +808,15 @@ def main(argv: list[str] | None = None) -> int:
     if raw and raw[0] in ("self-update", "selfupdate", "update"):
         from app.features.self_update import cmd_self_update
         return cmd_self_update(check_only=("--check" in raw[1:]))
+    if raw and raw[0] in ("opsec-check", "opseccheck"):
+        # Honor --opsec for the check itself (otherwise it's just a baseline)
+        if "--opsec" in raw[1:]:
+            os.environ.setdefault("OSINT_OPSEC", "1")
+        from app.features.opsec_check import cmd_opsec_check
+        return cmd_opsec_check()
+    if raw and raw[0] in ("cert-watch", "certwatch"):
+        from app.features.cert_watch import cmd_cert_watch
+        return cmd_cert_watch(raw[1:])
     if raw and raw[0] == "serve":
         from app.ui.web import serve as _serve
         port = 8765
