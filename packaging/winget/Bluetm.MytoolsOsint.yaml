@@ -1,0 +1,6 @@
+# Winget root version manifest.
+PackageIdentifier: Bluetm.MytoolsOsint
+PackageVersion: 0.2.0
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0

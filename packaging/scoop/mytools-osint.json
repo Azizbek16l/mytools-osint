@@ -1,24 +1,33 @@
 {
-  "version": "0.1.0",
-  "description": "Bluetm OSINT toolkit — CLI + GUI",
+  "version": "0.2.0",
+  "description": "Bluetm OSINT toolkit — 24 modules · CLI + GUI · red-team profiles · TUI · HTML reports · free APIs",
   "homepage": "https://github.com/Azizbek16l/mytools-osint",
-  "license": "Proprietary",
+  "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/Azizbek16l/mytools-osint/releases/download/v0.1.0/mytools-osint-windows-x64.exe#/mytools-osint.exe",
-      "hash": "REPLACE_WITH_ACTUAL_SHA256_AFTER_RELEASE"
+      "url": [
+        "https://github.com/Azizbek16l/mytools-osint/releases/download/v0.2.0/osint-windows-x64.exe#/osint.exe",
+        "https://github.com/Azizbek16l/mytools-osint/releases/download/v0.2.0/mytools-osint-windows-x64.exe#/mytools-osint.exe"
+      ],
+      "hash": [
+        "REPLACE_WITH_ACTUAL_CLI_SHA256_AFTER_RELEASE",
+        "REPLACE_WITH_ACTUAL_GUI_SHA256_AFTER_RELEASE"
+      ]
     }
   },
   "bin": [
-    ["mytools-osint.exe", "mytools-osint"],
-    ["mytools-osint.exe", "osint"]
+    "osint.exe",
+    "mytools-osint.exe"
   ],
   "persist": ".mytools-osint",
   "checkver": { "github": "https://github.com/Azizbek16l/mytools-osint" },
   "autoupdate": {
     "architecture": {
       "64bit": {
-        "url": "https://github.com/Azizbek16l/mytools-osint/releases/download/v$version/mytools-osint-windows-x64.exe"
+        "url": [
+          "https://github.com/Azizbek16l/mytools-osint/releases/download/v$version/osint-windows-x64.exe",
+          "https://github.com/Azizbek16l/mytools-osint/releases/download/v$version/mytools-osint-windows-x64.exe"
+        ]
       }
     }
   }

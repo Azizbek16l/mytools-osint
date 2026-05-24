@@ -1,10 +1,24 @@
 # Packaging & distribution
 
-`mytools-osint` ships through multiple channels, each suited to a different user
-profile. **Phase-1 channels** (PyPI, GitHub Releases binaries, Homebrew tap) are
-the only ones we maintain actively right now. **Phase-2 channels** (Winget, Scoop,
-npm) have manifests staged in this directory ready to publish once the project
-stabilises.
+`mytools-osint` ships through multiple channels. **Phase-1** (PyPI, GitHub
+Releases binaries, .deb/.rpm/AppImage, Homebrew tap, Docker on ghcr.io) are
+the always-on channels — anything pushed as a `v*` tag goes here. **Phase-2**
+(Winget, Scoop) have manifests staged in this directory and need a manual
+PR/bucket-update after each release.
+
+## Quick reference — install commands
+
+| Channel    | Command |
+|------------|---------|
+| Homebrew   | `brew tap Azizbek16l/osint && brew install mytools-osint` |
+| pipx       | `pipx install mytools-osint` |
+| Scoop      | `scoop bucket add bluetm https://github.com/Azizbek16l/scoop-bucket && scoop install mytools-osint` |
+| Winget     | `winget install Bluetm.MytoolsOsint` |
+| apt        | `sudo apt install ./mytools-osint_0.2.0_amd64.deb` (download from Releases first) |
+| dnf/yum    | `sudo dnf install https://github.com/Azizbek16l/mytools-osint/releases/download/v0.2.0/mytools-osint-0.2.0-1.x86_64.rpm` |
+| AppImage   | `curl -L .../mytools-osint-0.2.0-x86_64.AppImage -o osint && chmod +x osint` |
+| Docker     | `docker run --rm ghcr.io/azizbek16l/osint:latest torvalds` |
+| Direct bin | `curl -L .../osint-linux-x86_64 -o osint && chmod +x osint && sudo mv osint /usr/local/bin/` |
 
 ## Phase 1 — ship today
 

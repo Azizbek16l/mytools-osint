@@ -1,0 +1,36 @@
+# Winget locale manifest (en-US).
+PackageIdentifier: Bluetm.MytoolsOsint
+PackageVersion: 0.2.0
+PackageLocale: en-US
+Publisher: Bluetm.uz
+PublisherUrl: https://github.com/Azizbek16l
+PublisherSupportUrl: https://github.com/Azizbek16l/mytools-osint/issues
+PackageName: mytools-osint
+PackageUrl: https://github.com/Azizbek16l/mytools-osint
+License: MIT
+LicenseUrl: https://github.com/Azizbek16l/mytools-osint/blob/main/LICENSE
+Copyright: Copyright (c) 2026 Bluetm.uz / Mars IT
+ShortDescription: Personal OSINT CLI — free APIs, no paid keys, red-team profiles.
+Description: |-
+  mytools-osint is a single-binary OSINT toolkit. Given a username, email, phone,
+  Telegram handle, domain, or IP, it fans out across 1,000+ public sources in
+  parallel and streams findings into your terminal. Includes red-team profiles
+  (--profile red-team / domain-recon / ioc), live Textual TUI dashboard, dark
+  HTML reports with pivot graphs, JSONL streaming output, bulk-mode, OPSEC mode
+  (SOCKS5 + UA rotation + jitter), and 24 modules covering threat intel,
+  subdomain takeover, JS secret scanning, Wayback URL goldmine, DMARC/SPF/DKIM
+  grading, typosquat detection, PGP key lookup, and Tor relay checks.
+
+  All sources are free; optional API keys (HIBP / abuse.ch / AbuseIPDB / IPinfo)
+  unlock higher quotas. No mass-harvesting, no telemetry, no cloud sync.
+Moniker: osint
+Tags:
+  - osint
+  - security
+  - cli
+  - reconnaissance
+  - threat-intel
+  - red-team
+  - cybersecurity
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

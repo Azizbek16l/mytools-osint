@@ -1,16 +1,16 @@
 # Personal-tap formula for Bluetm.uz / mytools-osint.
 #
 # Usage (once tap is created):
-#   brew tap bluetm/osint
+#   brew tap Azizbek16l/osint
 #   brew install mytools-osint
 #
 # This formula installs the CLI only (`osint` command). For the GUI, install
 # the .pkg / .dmg directly from the GitHub release page.
 class MytoolsOsint < Formula
-  desc "Bluetm OSINT CLI — free APIs, no paid keys"
+  desc "Bluetm OSINT CLI — 24 free-source modules, red-team profiles, TUI, HTML reports"
   homepage "https://github.com/Azizbek16l/mytools-osint"
-  version "0.1.0"
-  license "Proprietary"
+  version "0.2.0"
+  license "MIT"
 
   on_macos do
     on_arm do
