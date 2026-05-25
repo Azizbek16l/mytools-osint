@@ -450,6 +450,21 @@ async def _stream_run(q: Query, args: argparse.Namespace, st: Style, sink) -> in
                     print(st.dim(f"  graph: +{ent_n} entities · +{edge_n} edges "
                                  f"→ `osint graph show {q.kind.value} {q.value}`"),
                           file=sys.stderr)
+                # v4.0 auto-pivot — runs AFTER stream drain (no nested-callback deadlock)
+                pivot_depth = getattr(args, "pivot", 0) or 0
+                if pivot_depth > 0:
+                    from app.features.pivot import auto_pivot
+                    print(st.dim(f"  ↪ auto-pivot starting (depth={pivot_depth})…"),
+                          file=sys.stderr)
+                    pivots = await auto_pivot(
+                        qid, db, depth=pivot_depth,
+                        on_progress=lambda msg: print(st.dim(msg), file=sys.stderr),
+                    )
+                    if pivots:
+                        total_found = sum(r.found for _, r in pivots)
+                        print(st.dim(f"  ↪ {len(pivots)} pivot scans · "
+                                     f"{total_found} additional positives"),
+                              file=sys.stderr)
             finally:
                 await db.close()
         except Exception as e:

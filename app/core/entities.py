@@ -252,8 +252,9 @@ class Edge:
 # ---- Auto-pivot routing -------------------------------------------------
 PIVOT_PROFILE: dict[EntityType, tuple[str, str]] = {
     EntityType.EMAIL:    ("email",    "person"),
-    EntityType.DOMAIN:   ("domain",   "domain-recon"),
-    EntityType.SUBDOMAIN:("domain",   "domain-recon"),
+    EntityType.DOMAIN:   ("domain",   "ioc"),       # 'ioc' is lighter than 'domain-recon' for pivot
+    EntityType.SUBDOMAIN:("domain",   "ioc"),
+    EntityType.HOSTNAME: ("domain",   "ioc"),       # a resolved hostname is just another domain
     EntityType.IP:       ("ip",       "ioc"),
     EntityType.USERNAME: ("username", "person"),
     EntityType.TELEGRAM: ("telegram", "person"),
