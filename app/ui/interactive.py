@@ -1465,7 +1465,7 @@ async def action_export(query: Query, hits: list[Hit]) -> None:
         "format?",
         choices=[
             Choice("csv  (one row per hit)",     value="csv",  shortcut_key="c"),
-            Choice("json (full payload)",        value="json", shortcut_key="j"),
+            Choice("json (full payload)",        value="json", shortcut_key="n"),  # 'j' is vim-nav
             Choice("md   (positives only)",      value="md",   shortcut_key="m"),
             Choice("← cancel",                   value=""),
         ],

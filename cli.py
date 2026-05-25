@@ -581,6 +581,11 @@ subcommands (run any of these in place of <value>):
   mcp               start MCP server over stdio (Claude / Cursor)
   watch add|list|remove|enable|disable|run        watchlist daemon
   diff <kind> <value> [--from ID --to ID]         diff two stored scans
+  graph show|export|rebuild|stats|forget  v4.0 entity graph
+  export <kind> <value> --to splunk|elastic|syslog|misp   push to SIEM
+  preset list|show|run <name>           YAML-defined saved scans
+  plugin list|install|search|remove     third-party plugin loader
+  ai explain|query                       Claude-powered analysis (needs ANTHROPIC_API_KEY)
 """
 
 
@@ -656,6 +661,25 @@ def _handle_config_subcommand(argv: list[str]) -> int:
     """`osint config ...` — dispatched before the main parser so its own arg shape works."""
     from app.ui import config_cli as cc
     sub = argv[0] if argv else ""
+    # v4.0: YAML config support
+    if sub in ("init-yaml", "yaml-init"):
+        from app.core.yaml_config import init_yaml_file
+        return init_yaml_file()
+    if sub == "show-yaml":
+        from app.core.yaml_config import load
+        c = load()
+        if c is None:
+            print("no YAML config found")
+            return 1
+        import json
+        print(json.dumps({
+            "path": str(c.path),
+            "profiles": list(c.profiles),
+            "presets": list(c.presets),
+            "sources": list(c.sources),
+            "defaults": c.defaults,
+        }, indent=2))
+        return 0
     if sub in ("", "wizard", "menu"):
         return cc.cmd_wizard()
     if sub == "show":
@@ -927,6 +951,16 @@ def main(argv: list[str] | None = None) -> int:
         "mcp": ("start MCP server over stdio (Claude / Cursor)",
             "usage: osint mcp\n"
             "  wire into your AI agent's mcp.json — see agent/mcp.json for an example."),
+        "graph": ("entity graph — show/export/rebuild/stats/forget (v4.0)",
+            "usage: osint graph <show|export|rebuild|stats|forget> ...\n"
+            "  show    <kind> <value> [--depth N]\n"
+            "  export  <kind> <value> [--format gexf|graphml|cytoscape] [--out FILE]\n"
+            "  rebuild         re-derive entities from every stored hit\n"
+            "  stats           totals per type\n"
+            "  forget  <kind> <value>"),
+        "export": ("push findings into a SIEM (Splunk/Elastic/syslog/MISP)",
+            "usage: osint export <kind> <value> --to <target>\n"
+            "  see `osint export --help` for env vars per target"),
     }
     if raw and raw[0] in _SUB_HELP and len(raw) > 1 and raw[1] in ("-h", "--help"):
         summary, body = _SUB_HELP[raw[0]]
@@ -960,6 +994,18 @@ def main(argv: list[str] | None = None) -> int:
     if raw and raw[0] == "graph":
         from app.features.graph import cmd_graph
         return cmd_graph(raw[1:])
+    if raw and raw[0] == "export":
+        from app.features.siem import cmd_export
+        return cmd_export(raw[1:])
+    if raw and raw[0] == "preset":
+        from app.core.yaml_config import cmd_preset
+        return cmd_preset(raw[1:])
+    if raw and raw[0] == "plugin":
+        from app.core.plugin_loader import cmd_plugin
+        return cmd_plugin(raw[1:])
+    if raw and raw[0] == "ai":
+        from app.features.ai import cmd_ai
+        return cmd_ai(raw[1:])
     if raw and raw[0] == "completion":
         shell = raw[1] if len(raw) > 1 else "bash"
         # Try filesystem path first (dev), then importlib resources (installed wheel).

@@ -2,6 +2,77 @@
 
 All notable changes to this project. Format: Keep-a-Changelog · Semver.
 
+## [4.0.0] - 2026-05-26  —  v4.0 cornerstone: entity graph + AI + plugins
+
+Major version. Re-imagined from a one-shot scanner into a **pivot-capable
+investigation engine** — Maltego-style entity correlation without the
+$5K/seat price tag.
+
+### NEW — Entity graph + correlation engine
+- **19 entity types** (Email/Domain/Subdomain/IP/Username/Phone/Telegram/
+  Person/Org/Hash/Cert/ASN/Bucket/Repo/CVE/Hostname/Port/Software/URL),
+  **33 typed edges** (RESOLVES_TO, MX_FOR, CERT_FOR, HAS_CVE, BLACKLISTED_ON,
+  TYPOSQUAT_OF, …) with per-edge traversal cost.
+- Same entity discovered by N modules → **ONE node** with N pieces of
+  evidence. Canonical-key normalisation at insert time.
+- Persisted in SQLite alongside hits. Schema migration v3.
+- `osint graph show <kind> <value> [--depth N]` — ASCII tree
+- `osint graph export <kind> <value> --format gexf|graphml|cytoscape`
+  → opens directly in Gephi / Maltego / Neo4j / yEd.
+- `osint graph rebuild` re-derives from every stored hit.
+- `osint graph forget` for GDPR-style erasure.
+
+### NEW — Auto-pivot (`--pivot N`)
+- After main scan, take every FOUND entity, route to appropriate profile,
+  re-run with bounded BFS. Cycle detection, noisy-value guard
+  (gmail.com / 1.1.1.1 skipped), per-edge cost budget, per-kind cap,
+  hard wall at 30 total pivots. Verified end-to-end: `8.8.8.8 --pivot 1`
+  discovers `dns.google` and pivots into ioc profile.
+
+### NEW — Interactive force-directed graph in HTML reports
+- Vanilla-JS (zero deps, no CDN, no D3, no Cytoscape) — Verlet integration
+  + drag/zoom/click-for-details. ~21 KB total for typical scans.
+- 19 entity types colour-coded with legend.
+- Click any node → side panel with in/out edge counts.
+
+### NEW — SIEM exporters (`osint export ... --to ...`)
+- Splunk HEC (newline-delimited)
+- Elasticsearch bulk-index
+- syslog RFC 5424 (UDP/TCP)
+- MISP Event creation (one Attribute per hit)
+- All read connection params from env or flags; politely SKIP if missing.
+
+### NEW — YAML config + presets
+- `~/.config/mytools-osint/config.yaml` declares `profiles`, `presets`,
+  `sources` (env-mapped API key registry), `defaults`.
+- `osint preset run <name>` re-runs a saved-scan recipe.
+- `osint config init-yaml` writes a sample.
+
+### NEW — Plugin architecture
+- Discovers third-party modules via `entry_points("mytools_osint.modules")`.
+- `osint plugin list|install|search|remove` — pip-driven.
+- Plugins live in the same interpreter (no sandbox — trust your sources).
+
+### NEW — AI-assisted analysis (`osint ai`)
+- `osint ai explain <kind> <value>` → 5-bullet executive summary +
+  risk ranking via Claude (claude-haiku-4-5 for cheap, bumps to sonnet
+  for >50 positives).
+- `osint ai query "natural language"` → translates to `osint <args>` + runs.
+- Requires `ANTHROPIC_API_KEY`. Disabled in OPSEC mode (privacy).
+
+### Reliability hardening
+- Real-PTY pexpect launch smoke test (would have caught the v0.3.1 `?`
+  shortcut crash in 2s instead of in production).
+- Parametrized shortcut-key validator — checks every Choice in app/ui/
+  against questionary's alphanumeric + no-vim-clash contract.
+- Found 3 latent bugs in static scan: `j` in export-format menu (vim-nav
+  clash), `--help` missing `export`/`graph` subcommands — all fixed.
+
+### Test count: 204 → **206** (+19 v4 entity + 10 smoke; — 17 stale)
+### Module count: 32 (unchanged; v4 invests in correlation, not new probes)
+### Subcommands: 10 → **15** (+graph, +export, +preset, +plugin, +ai)
+
+
 ## [0.3.1] - 2026-05-25  —  passive_dns + interactive bug-fixes
 
 ### Added

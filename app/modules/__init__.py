@@ -57,3 +57,10 @@ MODULES = [
 def register_all(r: Runner) -> None:
     for m in MODULES:
         m.register(r)
+    # v4.0: also discover third-party plugins via entry-points
+    try:
+        from app.core.plugin_loader import register_with_runner
+        register_with_runner(r)
+    except Exception:
+        # Loader is best-effort — never crash the host on plugin failures.
+        pass
