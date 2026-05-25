@@ -532,11 +532,26 @@ def _run_bulk(args: argparse.Namespace, st: Style) -> int:
 
     try:
         try:
-            n_found = 0
-            for t in targets:
-                rc = asyncio.run(_one(t))
-                if rc == 0:
-                    n_found += 1
+            # v4.0: parallel bulk mode. Run N targets concurrently via
+            # asyncio.gather + Semaphore. The Runner's own concurrency
+            # remains bounded by HTTP_CONCURRENCY; we just queue N targets
+            # at once instead of one-at-a-time.
+            parallel = max(1, int(getattr(args, "parallel", 4) or 4))
+            print(st.dim(f"\n  bulk: {len(targets)} targets · parallel={parallel}"),
+                  file=sys.stderr)
+
+            async def _runner_all():
+                sem = asyncio.Semaphore(parallel)
+
+                async def gated(t):
+                    async with sem:
+                        return await _one(t)
+
+                return await asyncio.gather(*[gated(t) for t in targets],
+                                              return_exceptions=False)
+
+            rcs = asyncio.run(_runner_all())
+            n_found = sum(1 for r in rcs if r == 0)
             print(st.dim(f"\n  bulk done: {n_found}/{len(targets)} with positives"),
                   file=sys.stderr)
             return 0 if n_found else 1
@@ -654,6 +669,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--pivot", type=int, default=0, metavar="DEPTH",
                     help="auto-pivot — after main scan, re-run profile-appropriate "
                          "scans against every discovered entity (bounded BFS, default depth 0 = off)")
+    ap.add_argument("--parallel", type=int, default=4, metavar="N",
+                    help="bulk mode: number of targets to scan concurrently (default: 4)")
     return ap
 
 
