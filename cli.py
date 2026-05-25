@@ -401,6 +401,26 @@ async def _stream_run(q: Query, args: argparse.Namespace, st: Style, sink) -> in
         except Exception as e:
             print(st.bad(f"  markdown report failed: {e}"), file=sys.stderr)
 
+    # v4.0: persist hits + derive entity graph for every scan (unless --no-save).
+    # This is what makes `osint graph show …` and --pivot work later.
+    if not getattr(args, "no_save", False):
+        try:
+            from app.core.config import settings as _s
+            from app.core.db import Database
+            db = Database(_s().db_path)
+            await db.connect()
+            try:
+                qid = await db.save_result(result)
+                ent_n, edge_n = await db.correlate_query(qid)
+                if ent_n or edge_n:
+                    print(st.dim(f"  graph: +{ent_n} entities · +{edge_n} edges "
+                                 f"→ `osint graph show {q.kind.value} {q.value}`"),
+                          file=sys.stderr)
+            finally:
+                await db.close()
+        except Exception as e:
+            print(st.dim(f"  (save+correlate skipped: {e})"), file=sys.stderr)
+
     return 0 if result.found > 0 else 1
 
 
@@ -574,6 +594,12 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="write a self-contained HTML report to FILE")
     ap.add_argument("--md", default=None, metavar="FILE",
                     help="write a Markdown report (great for GitHub issues / Notion)")
+    # v4.0 entity graph
+    ap.add_argument("--no-save", action="store_true",
+                    help="don't persist this scan's hits + graph entities to DB")
+    ap.add_argument("--pivot", type=int, default=0, metavar="DEPTH",
+                    help="auto-pivot — after main scan, re-run profile-appropriate "
+                         "scans against every discovered entity (bounded BFS, default depth 0 = off)")
     return ap
 
 
@@ -882,6 +908,9 @@ def main(argv: list[str] | None = None) -> int:
     if raw and raw[0] == "cache":
         from app.core.cache import cmd_cache
         return cmd_cache(raw[1:])
+    if raw and raw[0] == "graph":
+        from app.features.graph import cmd_graph
+        return cmd_graph(raw[1:])
     if raw and raw[0] == "completion":
         shell = raw[1] if len(raw) > 1 else "bash"
         # Try filesystem path first (dev), then importlib resources (installed wheel).

@@ -94,6 +94,53 @@ _MIGRATIONS: list[tuple[int, str]] = [
         CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
         """,
     ),
+    (
+        3,
+        # v4.0 entity graph layer. Per the backend reviewer's recommendation:
+        # two normalised tables, canonical column at insert time, JSON sidecar
+        # for type-specific attributes, UNIQUE on (src,dst,rel,hit_id) so the
+        # same (entity, entity, relationship) discovered by N hits records N
+        # pieces of evidence (not N duplicate edges).
+        """
+        CREATE TABLE IF NOT EXISTS entities (
+            id          TEXT PRIMARY KEY,        -- sha1(<type>:<canonical>)[:16]
+            type        TEXT NOT NULL,
+            value       TEXT NOT NULL,           -- canonical form
+            first_seen  TEXT NOT NULL,
+            last_seen   TEXT NOT NULL,
+            confidence  REAL NOT NULL DEFAULT 1.0,
+            tags        TEXT NOT NULL DEFAULT '[]',
+            extra_json  TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_entities_type   ON entities(type);
+        CREATE INDEX IF NOT EXISTS idx_entities_value  ON entities(type, value);
+
+        CREATE TABLE IF NOT EXISTS edges (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            src_id      TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+            dst_id      TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+            rel         TEXT NOT NULL,
+            source      TEXT NOT NULL DEFAULT '',     -- module / data source
+            hit_id      INTEGER REFERENCES hits(id) ON DELETE SET NULL,
+            confidence  REAL NOT NULL DEFAULT 1.0,
+            first_seen  TEXT NOT NULL,
+            last_seen   TEXT NOT NULL,
+            extra_json  TEXT NOT NULL DEFAULT '{}',
+            UNIQUE(src_id, dst_id, rel, hit_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_edges_src_rel ON edges(src_id, rel);
+        CREATE INDEX IF NOT EXISTS idx_edges_dst_rel ON edges(dst_id, rel);
+
+        -- Persisted pivot-visited set (so re-running an --pivot scan resumes).
+        CREATE TABLE IF NOT EXISTS pivot_visited (
+            query_id   INTEGER NOT NULL REFERENCES queries(id) ON DELETE CASCADE,
+            entity_id  TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+            depth      INTEGER NOT NULL DEFAULT 0,
+            visited_at TEXT NOT NULL,
+            PRIMARY KEY(query_id, entity_id)
+        );
+        """,
+    ),
 ]
 
 
@@ -384,3 +431,185 @@ class Database:
             (key, status, body, json.dumps(headers), f"+{ttl_sec} seconds"),
         )
         await self._conn.commit()
+
+    # ------------------------------------------------------------------ v4.0 entity graph
+
+    async def entity_upsert(self, entity) -> None:
+        """Insert or merge an Entity. Idempotent — same id updates last_seen."""
+        assert self._conn is not None
+        from app.core.entities import Entity  # noqa
+        ent: Entity = entity
+        now = ent.last_seen.isoformat()
+        await self._exec(
+            """INSERT INTO entities
+               (id, type, value, first_seen, last_seen, confidence, tags, extra_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 last_seen = excluded.last_seen,
+                 confidence = MAX(entities.confidence, excluded.confidence),
+                 tags = excluded.tags,
+                 extra_json = excluded.extra_json
+            """,
+            (ent.id, ent.type.value, ent.value, ent.first_seen.isoformat(),
+             now, ent.confidence, json.dumps(ent.tags),
+             json.dumps(ent.extra, default=str)),
+        )
+        await self._conn.commit()
+
+    async def edge_upsert(self, edge) -> None:
+        """Insert an Edge (uniq on (src,dst,rel,hit_id))."""
+        assert self._conn is not None
+        from app.core.entities import Edge  # noqa
+        e: Edge = edge
+        now = e.last_seen.isoformat()
+        await self._exec(
+            """INSERT INTO edges
+               (src_id, dst_id, rel, source, hit_id, confidence,
+                first_seen, last_seen, extra_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(src_id, dst_id, rel, hit_id) DO UPDATE SET
+                 last_seen = excluded.last_seen,
+                 confidence = MAX(edges.confidence, excluded.confidence)
+            """,
+            (e.src_id, e.dst_id, e.type.value, e.source, e.hit_id, e.confidence,
+             e.first_seen.isoformat(), now, json.dumps(e.extra, default=str)),
+        )
+        await self._conn.commit()
+
+    async def entity_get(self, type_: str, value: str):
+        """Look up one entity by (type, canonical-value). Returns dict or None."""
+        assert self._conn is not None
+        from app.core.entities import EntityType, canonical_key
+        canon = canonical_key(EntityType(type_), value)
+        async with self._conn.execute(
+            "SELECT * FROM entities WHERE type = ? AND value = ?",
+            (type_, canon),
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def edges_from(self, entity_id: str) -> list[dict]:
+        """All edges leaving this entity (id, dst_id, rel, source, confidence)."""
+        assert self._conn is not None
+        async with self._conn.execute(
+            """SELECT src_id, dst_id, rel, source, confidence, first_seen, last_seen
+               FROM edges WHERE src_id = ?""",
+            (entity_id,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def edges_to(self, entity_id: str) -> list[dict]:
+        """All edges arriving at this entity."""
+        assert self._conn is not None
+        async with self._conn.execute(
+            """SELECT src_id, dst_id, rel, source, confidence, first_seen, last_seen
+               FROM edges WHERE dst_id = ?""",
+            (entity_id,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+    async def neighbours_batch(self, entity_ids: list[str]) -> list[dict]:
+        """Edges + dst-entity rows for a batch (used by BFS — backend reviewer's
+        recommendation: chunk to 500 to avoid SQLite param limit)."""
+        assert self._conn is not None
+        if not entity_ids:
+            return []
+        out: list[dict] = []
+        for i in range(0, len(entity_ids), 500):
+            chunk = entity_ids[i:i + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            async with self._conn.execute(
+                f"""SELECT e.src_id, e.dst_id, e.rel, e.source, e.confidence,
+                          t.type AS dst_type, t.value AS dst_value
+                   FROM edges e JOIN entities t ON e.dst_id = t.id
+                   WHERE e.src_id IN ({placeholders})""",
+                tuple(chunk),
+            ) as cur:
+                rows = await cur.fetchall()
+                out.extend(dict(r) for r in rows)
+        return out
+
+    async def entity_count(self) -> int:
+        assert self._conn is not None
+        async with self._conn.execute("SELECT COUNT(*) AS n FROM entities") as cur:
+            row = await cur.fetchone()
+        return row["n"] if row else 0
+
+    async def edge_count(self) -> int:
+        assert self._conn is not None
+        async with self._conn.execute("SELECT COUNT(*) AS n FROM edges") as cur:
+            row = await cur.fetchone()
+        return row["n"] if row else 0
+
+    async def entity_forget(self, type_: str, value: str) -> int:
+        """GDPR-style erasure. Removes entity + cascading edges via FK."""
+        assert self._conn is not None
+        from app.core.entities import EntityType, canonical_key
+        canon = canonical_key(EntityType(type_), value)
+        cur = await self._conn.execute(
+            "DELETE FROM entities WHERE type = ? AND value = ?",
+            (type_, canon),
+        )
+        await self._conn.commit()
+        return cur.rowcount or 0
+
+    async def pivot_visited_add(self, query_id: int, entity_id: str, depth: int) -> bool:
+        """Returns True if newly added (unseen for this scan), False if already seen."""
+        assert self._conn is not None
+        try:
+            await self._exec(
+                """INSERT INTO pivot_visited (query_id, entity_id, depth, visited_at)
+                   VALUES (?, ?, ?, datetime('now'))""",
+                (query_id, entity_id, depth),
+            )
+            await self._conn.commit()
+            return True
+        except aiosqlite.IntegrityError:
+            return False
+
+    async def correlate_query(self, query_id: int) -> tuple[int, int]:
+        """Run correlation.derive() over every hit of a saved query, upsert
+        the resulting entities + edges. Returns (n_entities_seen, n_edges_seen).
+        Idempotent — re-running just refreshes last_seen timestamps.
+        """
+        assert self._conn is not None
+        from app.core.correlation import derive
+        # Load query
+        async with self._conn.execute(
+            "SELECT * FROM queries WHERE id = ?", (query_id,),
+        ) as cur:
+            qrow = await cur.fetchone()
+        if not qrow:
+            return (0, 0)
+        from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
+        from datetime import datetime as _dt
+        query = Query(
+            kind=QueryKind(qrow["kind"]),
+            value=qrow["value"],
+            note=qrow["note"],
+            started_at=_dt.fromisoformat(qrow["started_at"]),
+        )
+        # Load all hits with their ids
+        async with self._conn.execute(
+            "SELECT * FROM hits WHERE query_id = ?", (query_id,),
+        ) as cur:
+            hit_rows = await cur.fetchall()
+        seen_entities: set[str] = set()
+        seen_edges: set[tuple[str, str, str]] = set()
+        for hr in hit_rows:
+            hit = Hit(
+                module=hr["module"], source=hr["source"], category=hr["category"],
+                status=HitStatus(hr["status"]), title=hr["title"], url=hr["url"],
+                detail=hr["detail"], severity=Severity(hr["severity"]),
+                extra=json.loads(hr["extra_json"] or "{}"),
+                found_at=_dt.fromisoformat(hr["found_at"]),
+                latency_ms=hr["latency_ms"],
+            )
+            entities, edges = derive(query, hit, hr["id"])
+            for ent in entities:
+                await self.entity_upsert(ent)
+                seen_entities.add(ent.id)
+            for e in edges:
+                await self.edge_upsert(e)
+                seen_edges.add((e.src_id, e.dst_id, e.type.value))
+        return (len(seen_entities), len(seen_edges))
