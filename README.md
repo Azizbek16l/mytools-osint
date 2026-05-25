@@ -7,8 +7,11 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-windows%20%7C%20macOS%20%7C%20linux-lightgrey)
-[![tests](https://img.shields.io/badge/tests-204%20passing-brightgreen)](#)
-[![modules](https://img.shields.io/badge/modules-31-blue)](#)
+[![tests](https://img.shields.io/badge/tests-206%20passing-brightgreen)](#)
+[![modules](https://img.shields.io/badge/modules-32-blue)](#)
+[![subcommands](https://img.shields.io/badge/subcommands-15-blue)](#)
+[![entity%20types](https://img.shields.io/badge/entity%20types-19-blueviolet)](#)
+[![edge%20types](https://img.shields.io/badge/edge%20types-33-blueviolet)](#)
 [![GitHub release](https://img.shields.io/github/v/release/Azizbek16l/mytools-osint?sort=semver)](https://github.com/Azizbek16l/mytools-osint/releases/latest)
 
 ---
@@ -27,6 +30,38 @@ Given one input — a username, email, phone, Telegram handle, domain, or IP —
 - **Patterns** → username variations + email-format guesses (offline)
 
 **No paid APIs are required.** Optional keys (HIBP / Numverify / IPinfo / LeakCheck / GitHub PAT / abuse.ch / AbuseIPDB) unlock higher quotas but the tool degrades gracefully.
+
+## What's new in 4.0 — entity graph + auto-pivot + SIEM + AI
+
+Major version. `mytools-osint` is no longer a one-shot scanner — it's a
+**pivot-capable investigation engine** with entity correlation, like
+Maltego but free + CLI-first.
+
+```bash
+osint github.com --profile red-team --pivot 1 --html report.html --explain
+# scan → save → correlate → auto-pivot → HTML + interactive graph → Claude summary
+```
+
+| New surface | Use case |
+|---|---|
+| `osint graph show/export/rebuild/stats/forget` | Entity graph CRUD; export GEXF (Gephi) / GraphML (Maltego) / Cytoscape JSON |
+| `osint <target> --pivot N` | Auto-pivot — re-runs profile-appropriate scans against every discovered entity (bounded BFS) |
+| `osint <target> --html report.html` | Interactive force-directed graph in the report (vanilla JS, no CDN) |
+| `osint export <kind> <value> --to splunk\|elastic\|syslog\|misp` | SIEM exporters |
+| `osint preset list/run <name>` | YAML-defined saved scans (`~/.config/mytools-osint/config.yaml`) |
+| `osint plugin list/install/search/remove` | Third-party module loader (entry-points) |
+| `osint ai explain <kind> <value>` | Claude exec summary of latest scan |
+| `osint ai query "find phishing infra targeting acme.com"` | NL → osint args |
+| `osint --bulk file --parallel 8` | Concurrent multi-target |
+| `osint --explain` | Chain scan + AI summary in one command |
+| TUI: `/` key | Inline fuzzy filter across hits |
+
+**Entity types**: Email · Domain · Subdomain · IP · Username · Phone ·
+Telegram · Person · Org · Hash · Cert · ASN · Bucket · Repo · CVE ·
+Hostname · Port · Software · URL.
+
+**Edge relationships**: 33 typed (`RESOLVES_TO`, `MX_FOR`, `CERT_FOR`,
+`HAS_CVE`, `BLACKLISTED_ON`, `TYPOSQUAT_OF`, `IN_ASN`, `EXPOSES_PORT`, …).
 
 ## What's new in 0.3 — cyber-pro: web dashboard + 7 modules + self-update
 
