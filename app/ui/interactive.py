@@ -131,7 +131,7 @@ _HELP_SCREENS: dict[str, list[tuple[str, str]]] = {
         ("S", "sites — Sherlock + WhatsMyName breakdown"),
         ("P", "command palette — fuzzy launcher for any action"),
         ("T", "settings — API keys · Telegram · paths"),
-        ("?", "this help overlay"),
+        ("I", "this info / help overlay"),
         ("Q", "exit"),
     ],
     "results": [
@@ -1853,19 +1853,19 @@ async def run_interactive(show_figlet: bool = False) -> int:
                            value="palette",  shortcut_key="p"),
                     Choice("  [T]  settings             API keys · Telegram · paths",
                            value="settings", shortcut_key="t"),
-                    Choice("  [?]  help                 keys, profiles, sub-commands",
-                           value="help",     shortcut_key="?"),
+                    Choice("  [I]  info / help          keybindings, profiles, sub-commands",
+                           value="help",     shortcut_key="i"),
                     Choice("  [Q]  exit",
                            value="exit",     shortcut_key="q"),
                 ],
                 style=QSTYLE,
                 use_shortcuts=True,
                 qmark="",
-                instruction="(↑↓ or l/h/m/s/p/t/?/q)",
+                instruction="(↑↓ or l/h/m/s/p/t/i/q)",
             ).ask_async()
             _print_keybindings(
                 ("↑↓", "navigate"), ("↵", "select"),
-                ("l/h/m/s/p/t", "jump"), ("?", "help"), ("q", "quit"),
+                ("l/h/m/s/p/t/i", "jump"), ("q", "quit"),
             )
             if choice in (None, "exit"):
                 console.print(f"\n[{tokens.DIM}]bye — {BRAND}[/]\n")
