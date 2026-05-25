@@ -35,6 +35,7 @@ def main() -> int:
         "--include-package=telethon",
         "--include-package-data=phonenumbers",
         "--include-data-dir=data=data",
+        "--include-data-dir=scripts/completions=scripts/completions",
         "--include-data-files=.env.example=.env.example",
         "--nofollow-import-to=PySide6",
         "--nofollow-import-to=qasync",
