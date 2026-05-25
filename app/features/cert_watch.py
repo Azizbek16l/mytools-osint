@@ -31,7 +31,13 @@ CERTSTREAM_WS = "wss://certstream.calidog.io"
 async def _ws_connect(host: str, path: str = "/") -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     """Minimal WebSocket handshake against a wss:// host. Stdlib only."""
     import ssl
-    ctx = ssl.create_default_context()
+    # Prefer certifi's CA bundle — the stdlib default fails on Python.framework
+    # builds (macOS) and on systems where the OS trust store isn't wired up.
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ctx = ssl.create_default_context()
     reader, writer = await asyncio.open_connection(host, 443, ssl=ctx)
     key = base64.b64encode(secrets.token_bytes(16)).decode()
     handshake = (
