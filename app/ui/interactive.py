@@ -129,7 +129,9 @@ _HELP_SCREENS: dict[str, list[tuple[str, str]]] = {
         ("H", "recent history (last 50)"),
         ("M", "modules — k9s-style table + toggle"),
         ("S", "sites — Sherlock + WhatsMyName breakdown"),
+        ("P", "command palette — fuzzy launcher for any action"),
         ("T", "settings — API keys · Telegram · paths"),
+        ("?", "this help overlay"),
         ("Q", "exit"),
     ],
     "results": [
@@ -1847,19 +1849,23 @@ async def run_interactive(show_figlet: bool = False) -> int:
                            value="modules",  shortcut_key="m"),
                     Choice("  [S]  sites                Sherlock + WhatsMyName breakdown",
                            value="stats",    shortcut_key="s"),
+                    Choice("  [P]  command palette      fuzzy launcher for any action",
+                           value="palette",  shortcut_key="p"),
                     Choice("  [T]  settings             API keys · Telegram · paths",
                            value="settings", shortcut_key="t"),
+                    Choice("  [?]  help                 keys, profiles, sub-commands",
+                           value="help",     shortcut_key="?"),
                     Choice("  [Q]  exit",
                            value="exit",     shortcut_key="q"),
                 ],
                 style=QSTYLE,
                 use_shortcuts=True,
                 qmark="",
-                instruction="(↑↓ or l/h/m/s/t/q)",
+                instruction="(↑↓ or l/h/m/s/p/t/?/q)",
             ).ask_async()
             _print_keybindings(
                 ("↑↓", "navigate"), ("↵", "select"),
-                ("l/h/m/s/t", "jump"), ("q", "quit"),
+                ("l/h/m/s/p/t", "jump"), ("?", "help"), ("q", "quit"),
             )
             if choice in (None, "exit"):
                 console.print(f"\n[{tokens.DIM}]bye — {BRAND}[/]\n")
@@ -1875,17 +1881,26 @@ async def run_interactive(show_figlet: bool = False) -> int:
                 await action_stats()
             elif choice == "settings":
                 # cmd_wizard() is sync + internally calls asyncio.run() for
-                # the Telegram-status check. Running it inline here would
-                # fail with "cannot be called from a running event loop"
-                # because the interactive shell *is* an asyncio loop.
-                # Punt it into a worker thread so the inner asyncio.run gets
-                # its own loop and our outer loop stays clean.
+                # the Telegram-status check. Off-load to a thread so its
+                # asyncio.run gets its own loop.
                 import asyncio as _asyncio
                 from app.ui.config_cli import cmd_wizard
                 try:
                     await _asyncio.to_thread(cmd_wizard)
                 except Exception as e:
                     console.print(f"[{tokens.BAD}]settings wizard error:[/] {e}")
+            elif choice == "palette":
+                from app.ui.command_palette import build_palette, open_palette
+
+                async def _db_factory():
+                    return db
+                try:
+                    await open_palette(build_palette(_db_factory))
+                except Exception as e:
+                    console.print(f"[{tokens.BAD}]palette error:[/] {e}")
+            elif choice == "help":
+                await show_help("main")
+                await _press_enter()
     except (KeyboardInterrupt, EOFError):
         console.print(f"\n[{tokens.DIM}]bye — {BRAND}[/]\n")
         return 130
