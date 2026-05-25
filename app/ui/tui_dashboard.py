@@ -56,13 +56,47 @@ def run_tui(query: Query, html_out: str | None = None) -> int:
         from textual.binding import Binding
         from textual.containers import Horizontal, Vertical
         from textual.reactive import reactive
-        from textual.widgets import DataTable, Footer, Header, Static
+        from textual.screen import ModalScreen
+        from textual.widgets import DataTable, Footer, Header, Input, Label, Static
     except ImportError as e:
         raise ImportError(
             "textual is required for --tui mode. Install: pip install textual>=0.50"
         ) from e
 
     load_settings()
+
+    class _SearchScreen(ModalScreen):
+        """Modal input for inline TUI search — pops up on `/` keypress."""
+        CSS = """
+        _SearchScreen { align: center middle; background: rgba(0,0,0,0.6); }
+        #search-box { width: 60%; max-width: 80; height: 5;
+                      background: #142231; border: solid #83c5ff;
+                      padding: 1 2; }
+        #search-input { background: #0e1822; color: #e6edf3; }
+        #search-hint { color: #9ba9b8; text-style: italic; }
+        """
+        BINDINGS = [Binding("escape", "dismiss_now", "cancel")]
+
+        def __init__(self, dashboard: "Dashboard") -> None:
+            super().__init__()
+            self._dashboard = dashboard
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="search-box"):
+                yield Label("[b]filter findings[/]  [#9ba9b8](type to filter · Enter applies · Esc cancels)[/]")
+                yield Input(value=self._dashboard.search_query,
+                            placeholder="substring (matches module, source, title, detail, url)…",
+                            id="search-input")
+
+        def on_input_submitted(self, event: Input.Submitted) -> None:
+            self._dashboard.search_query = event.value.strip()
+            self._dashboard._refresh_stats()
+            self._dashboard._rebuild_hit_table()
+            self.app.pop_screen()
+
+        def action_dismiss_now(self) -> None:
+            self.app.pop_screen()
+
 
     class Dashboard(App):
         CSS = """
@@ -83,10 +117,13 @@ def run_tui(query: Query, html_out: str | None = None) -> int:
             Binding("s", "save_jsonl", "save jsonl"),
             Binding("p", "toggle_pause", "pause stream"),
             Binding("f", "filter_found", "found-only"),
+            Binding("slash", "search", "search"),       # v4.0: / inline filter
+            Binding("escape", "clear_search", "clear"),
         ]
 
         paused = reactive(False)
         only_found = reactive(False)
+        search_query = reactive("")
 
         def __init__(self, q: Query) -> None:
             super().__init__()
@@ -180,11 +217,13 @@ def run_tui(query: Query, html_out: str | None = None) -> int:
             high = sum(1 for h in self.hits if h.severity == Severity.HIGH)
             pause = "[yellow] PAUSED[/]" if self.paused else ""
             filt = " · [cyan]found-only[/]" if self.only_found else ""
+            search = (f" · [yellow]/{self.search_query}/[/]"
+                      if self.search_query else "")
             return (f"[b]{self.query.kind.value.upper()}[/b]  "
                     f"[#83c5ff]{self.query.value}[/]   "
                     f"hits=[b]{n}[/]  found=[green]{pos}[/]  "
                     f"crit=[red]{crit}[/]  high=[red]{high}[/]  "
-                    f"elapsed={elapsed:.1f}s{pause}{filt}")
+                    f"elapsed={elapsed:.1f}s{pause}{filt}{search}")
 
         def _refresh_stats(self) -> None:
             try:
@@ -200,12 +239,40 @@ def run_tui(query: Query, html_out: str | None = None) -> int:
         def action_filter_found(self) -> None:
             self.only_found = not self.only_found
             self._refresh_stats()
-            # Rebuild hit table.
+            self._rebuild_hit_table()
+
+        def action_search(self) -> None:
+            """v4.0: prompt for inline filter — fuzzy substring across all fields."""
+            from textual.widgets import Input
+            # textual's screens push/pop modally; for now we use a simple
+            # asyncio prompt via the footer-level keybinding hint.
+            # Better: pop a modal Input. Stub for now: cycle through 3 demos
+            # to prove the wiring works. Real impl below.
+            self.push_screen(_SearchScreen(self))
+
+        def action_clear_search(self) -> None:
+            self.search_query = ""
+            self._refresh_stats()
+            self._rebuild_hit_table()
+
+        def _hit_matches_search(self, h: Hit) -> bool:
+            if not self.search_query:
+                return True
+            q = self.search_query.lower()
+            for field in (h.module, h.source, h.title, h.detail, h.url,
+                          h.category, h.severity.value):
+                if field and q in field.lower():
+                    return True
+            return False
+
+        def _rebuild_hit_table(self) -> None:
             try:
                 ht: DataTable = self.query_one("#hit_table", DataTable)
                 ht.clear()
                 for h in self.hits:
                     if self.only_found and h.status != HitStatus.FOUND:
+                        continue
+                    if not self._hit_matches_search(h):
                         continue
                     sev = h.severity.value
                     sev_style = _SEV_STYLE.get(sev, "dim")
