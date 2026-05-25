@@ -385,10 +385,44 @@ async def _stream_run(q: Query, args: argparse.Namespace, st: Style, sink) -> in
     if getattr(args, "html", None):
         try:
             from app.ui.html_report import render_report
-            html = render_report(q, result, elapsed_ms)
+            # v4.0: if entity graph available, include interactive force-graph.
+            entities = edges = None
+            if not getattr(args, "no_save", False):
+                try:
+                    from app.core.config import settings as _s
+                    from app.core.db import Database
+                    from app.core.entities import EntityType
+                    from app.features.graph import bfs_subgraph
+                    _db = Database(_s().db_path)
+                    await _db.connect()
+                    try:
+                        # Save+correlate first so this scan's hits are in the graph
+                        qid_tmp = await _db.save_result(result)
+                        await _db.correlate_query(qid_tmp)
+                        # BFS from query root
+                        kind_to_etype = {
+                            "email": EntityType.EMAIL,
+                            "domain": EntityType.DOMAIN,
+                            "ip": EntityType.IP,
+                            "username": EntityType.USERNAME,
+                            "telegram": EntityType.TELEGRAM,
+                            "phone": EntityType.PHONE,
+                            "hash": EntityType.HASH,
+                        }
+                        et = kind_to_etype.get(q.kind.value)
+                        if et:
+                            entities, edges = await bfs_subgraph(_db, et, q.value, max_depth=2)
+                    finally:
+                        await _db.close()
+                    # Don't re-save in the lower hook
+                    args.no_save = True
+                except Exception:
+                    pass
+            html = render_report(q, result, elapsed_ms, entities=entities, edges=edges)
             await asyncio.to_thread(Path(args.html).write_text, html,
                                     encoding="utf-8")
-            print(st.dim(f"  html report → {args.html}"), file=sys.stderr)
+            extra = f"  · interactive graph ({len(entities)} nodes)" if entities else ""
+            print(st.dim(f"  html report → {args.html}{extra}"), file=sys.stderr)
         except Exception as e:
             print(st.bad(f"  html report failed: {e}"), file=sys.stderr)
 
