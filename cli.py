@@ -465,6 +465,13 @@ async def _stream_run(q: Query, args: argparse.Namespace, st: Style, sink) -> in
                         print(st.dim(f"  ↪ {len(pivots)} pivot scans · "
                                      f"{total_found} additional positives"),
                               file=sys.stderr)
+                # v4.0: --explain → call Claude after scan completes
+                if getattr(args, "explain", False):
+                    try:
+                        from app.features.ai import _explain
+                        await _explain(q.kind.value, q.value)
+                    except Exception as ex:
+                        print(st.bad(f"  ai explain failed: {ex}"), file=sys.stderr)
             finally:
                 await db.close()
         except Exception as e:
@@ -671,6 +678,9 @@ def _build_parser() -> argparse.ArgumentParser:
                          "scans against every discovered entity (bounded BFS, default depth 0 = off)")
     ap.add_argument("--parallel", type=int, default=4, metavar="N",
                     help="bulk mode: number of targets to scan concurrently (default: 4)")
+    ap.add_argument("--explain", action="store_true",
+                    help="after the scan, ask Claude for an executive summary "
+                         "(needs ANTHROPIC_API_KEY; disabled in --opsec)")
     return ap
 
 
