@@ -15,6 +15,7 @@ Response: plain text (one record per line).
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from urllib.parse import quote
 
 from app.core.http import get_client
 from app.core.runner import Runner
@@ -28,7 +29,7 @@ _MAX_LINES = 500
 async def _call(tool: str, resource: str) -> tuple[int, list[str]]:
     """Returns (status_code, lines). 200+empty means quota exceeded."""
     client = await get_client()
-    url = f"https://api.hackertarget.com/{tool}/?q={resource}"
+    url = f"https://api.hackertarget.com/{tool}/?q={quote(resource, safe='')}"
     try:
         r = await client.get(url, timeout=_TIMEOUT)
     except Exception:

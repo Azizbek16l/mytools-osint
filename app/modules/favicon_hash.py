@@ -16,12 +16,14 @@ OPSEC: One HTTP GET to the target host. Refuse to run in --opsec mode.
 from __future__ import annotations
 
 import base64
+import ipaddress
 import os
 from collections.abc import AsyncIterator
 
-from app.core.http import get_client
+from app.core.http import _opsec_on, get_client
 from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
+from app.modules.web_recon import _mmh3_x86_32
 
 NAME = "favicon_hash"
 
@@ -31,32 +33,65 @@ _MAX_BYTES = 1_000_000  # 1 MB cap — defends against /favicon.ico that serves 
 
 
 def _shodan_mmh3(content: bytes) -> int:
-    """Replicate Shodan's exact favicon-hash recipe (mmh3-32, signed int)."""
-    import mmh3
+    """Replicate Shodan's exact favicon-hash recipe (mmh3-32, signed int).
+
+    Uses the in-tree pure-Python implementation (web_recon._mmh3_x86_32) —
+    no external `mmh3` C-extension dep required.
+    """
     # Shodan splits base64 into 76-char lines (RFC 2045 / MIME), terminates with \n.
     b64 = base64.encodebytes(content)  # default: 76-char lines + trailing \n
-    return mmh3.hash(b64)
+    return _mmh3_x86_32(b64)
+
+
+def _is_private_host(host: str) -> bool:
+    """SSRF guard — reject loopback, private, link-local, reserved, multicast IPs.
+
+    Hostnames pass through (we trust caller-supplied DNS).
+    """
+    # IPv4 has at most one colon (port); IPv6 has 2+ colons. Try the full
+    # string first (handles IPv6 like "::1"), then strip a port if present.
+    candidates = [host]
+    if host.count(":") == 1:
+        candidates.append(host.split(":", 1)[0])
+    elif host.startswith("[") and "]" in host:
+        candidates.append(host[1:host.index("]")])
+    for cand in candidates:
+        try:
+            ip = ipaddress.ip_address(cand)
+        except ValueError:
+            continue
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return True
+    return False
 
 
 async def _run(query: Query) -> AsyncIterator[Hit]:
     if query.kind not in (QueryKind.DOMAIN, QueryKind.IP):
         return
-    if os.environ.get("OSINT_OPSEC_MODE") == "1" and os.environ.get(
-            "OSINT_FAVICON_HASH_OVER_TOR") != "1":
+    if _opsec_on() and os.environ.get("OSINT_FAVICON_HASH_OVER_TOR") != "1":
         yield Hit(module=NAME, source="favicon", category="fingerprint",
                   status=HitStatus.SKIPPED,
                   title="skipped in --opsec mode",
                   detail="set OSINT_FAVICON_HASH_OVER_TOR=1 to override")
         return
 
-    host = (query.value or "").strip().lower().lstrip("*.").rstrip("/")
+    host = (query.value or "").strip().lower().removeprefix("*.").rstrip("/")
+    # SSRF guard — private / loopback / metadata IPs.
+    if _is_private_host(host):
+        yield Hit(module=NAME, source="favicon", category="fingerprint",
+                  status=HitStatus.SKIPPED,
+                  title="refused: private/loopback/link-local IP",
+                  detail=f"will not probe internal address {host}")
+        return
     client = await get_client()
 
     for path in _FAVICON_PATHS:
         url = f"https://{host}{path}"
         try:
+            # No cross-host redirects for favicons — narrows SSRF surface.
             r = await client.get(url, timeout=_TIMEOUT,
-                                 follow_redirects=True)
+                                 follow_redirects=False)
         except Exception:
             continue
         if r.status_code != 200:

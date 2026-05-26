@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from app.core.http import get_client
 from app.core.runner import Runner
@@ -38,9 +38,9 @@ _INTERESTING_RE = (
 async def _run(query: Query) -> AsyncIterator[Hit]:
     if query.kind != QueryKind.DOMAIN:
         return
-    host = (query.value or "").strip().lower().lstrip("*.").rstrip("/")
+    host = (query.value or "").strip().lower().removeprefix("*.").rstrip("/")
     # Wildcard subdomains query — surfaces forgotten staging/dev hosts too.
-    pattern = f"*.{host}/*"
+    pattern = quote(f"*.{host}/*", safe="*")
     url = (f"https://web.archive.org/cdx/search/cdx?url={pattern}"
            f"&output=json&collapse=urlkey&limit={_MAX_URLS}")
     client = await get_client()

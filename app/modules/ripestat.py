@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 from collections.abc import AsyncIterator
+from urllib.parse import quote
 
 from app.core.http import get_client
 from app.core.runner import Runner
@@ -26,7 +27,7 @@ _TIMEOUT = 10.0
 
 
 async def _call(client, call: str, resource: str) -> dict | None:
-    url = _BASE.format(call=call) + f"?resource={resource}&sourceapp=mytools-osint"
+    url = _BASE.format(call=call) + f"?resource={quote(resource, safe='')}&sourceapp=mytools-osint"
     try:
         r = await client.get(url, timeout=_TIMEOUT,
                              headers={"accept": "application/json"})

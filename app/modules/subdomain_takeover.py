@@ -25,7 +25,7 @@ from collections.abc import AsyncIterator
 
 import dns.asyncresolver
 
-from app.core.http import get_client
+from app.core.http import _opsec_on, get_client
 from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
 
@@ -121,14 +121,13 @@ async def _probe(host: str) -> Hit | None:
 async def _run(query: Query) -> AsyncIterator[Hit]:
     if query.kind != QueryKind.DOMAIN:
         return
-    if os.environ.get("OSINT_OPSEC_MODE") == "1" and os.environ.get(
-            "OSINT_SUBDOMAIN_TAKEOVER_OVER_TOR") != "1":
+    if _opsec_on() and os.environ.get("OSINT_SUBDOMAIN_TAKEOVER_OVER_TOR") != "1":
         yield Hit(module=NAME, source="local", category="dns",
                   status=HitStatus.SKIPPED,
                   title="skipped in --opsec mode",
                   detail="DNS + HTTP probe per subdomain; set OSINT_SUBDOMAIN_TAKEOVER_OVER_TOR=1 to override")
         return
-    host = (query.value or "").strip().lower().lstrip("*.").rstrip("/")
+    host = (query.value or "").strip().lower().removeprefix("*.").rstrip("/")
     # We probe BOTH the apex (cheap) and any known subdomain entities (if graph
     # already has them — caller can re-run after subdomain enum modules).
     candidates: list[str] = [host]

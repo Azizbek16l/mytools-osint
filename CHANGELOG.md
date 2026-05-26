@@ -2,6 +2,33 @@
 
 All notable changes to this project. Format: Keep-a-Changelog · Semver.
 
+## [4.2.1] - 2026-05-26  —  Security hotfix: OPSEC bypass, SSRF guard, URL injection
+
+Driven by senior-security-engineer audit of v4.2.0. Three P0/P1 fixes:
+
+### Fixed
+- **[P0]** `--opsec` bypass — `favicon_hash` and `subdomain_takeover` checked
+  the non-existent env var `OSINT_OPSEC_MODE` instead of the canonical
+  `OSINT_OPSEC`. The "skipped in --opsec mode" guards were dead code; both
+  modules ran during opsec scans. Now use the shared `_opsec_on()` helper.
+- **[P0]** External `mmh3` C-extension was imported but never declared in
+  `pyproject.toml` → ImportError for end users. Replaced with the in-tree
+  pure-Python `app.modules.web_recon._mmh3_x86_32` (Shodan-compatible,
+  already tested against the canonical vector).
+- **[P1]** SSRF guard — `favicon_hash` now refuses private/loopback/
+  link-local/reserved/multicast IPs (RFC1918, 127.0.0.1, 169.254.169.254
+  metadata, ::1, fe80::, etc.). `follow_redirects=False` added so a
+  hostile target can't bounce us to internal addresses.
+- **[P1]** URL-parameter injection — `certspotter`, `wayback_urls`,
+  `hackertarget`, `ripestat` now `urllib.parse.quote()` the user-controlled
+  `query.value` before f-string interpolating into the request URL.
+- **[P2]** Replaced `lstrip("*.")` (per-character strip, buggy) with
+  `removeprefix("*.")` across all v4.2 modules.
+
+### Tests
+- 11 new regression tests in `tests/test_v42_security_fixes.py` and
+  earlier rate-limit branch (230 → 241 total).
+
 ## [4.2.0] - 2026-05-26  —  Smart Shell + Free Sources: single-fire menu, 6 themes, 6 new modules
 
 Major UX + features release driven by a multi-agent /goal audit (UX engineer, QA, research).

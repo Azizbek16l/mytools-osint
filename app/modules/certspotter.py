@@ -15,6 +15,7 @@ Endpoint: https://api.certspotter.com/v1/issuances
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from urllib.parse import quote
 
 from app.core.http import get_client
 from app.core.runner import Runner
@@ -28,9 +29,10 @@ _MAX_RESULTS = 1000        # CertSpotter pages at 1000
 async def _run(query: Query) -> AsyncIterator[Hit]:
     if query.kind != QueryKind.DOMAIN:
         return
-    domain = (query.value or "").strip().lower().lstrip("*.").rstrip("/")
+    domain = (query.value or "").strip().lower().removeprefix("*.").rstrip("/")
     url = (f"https://api.certspotter.com/v1/issuances"
-           f"?domain={domain}&include_subdomains=true&expand=dns_names")
+           f"?domain={quote(domain, safe='')}"
+           f"&include_subdomains=true&expand=dns_names")
     client = await get_client()
     try:
         r = await client.get(url, timeout=_TIMEOUT,
