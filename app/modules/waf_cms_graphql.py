@@ -169,13 +169,27 @@ async def _gql_run(query: Query) -> AsyncIterator[Hit]:
             r = await client.post(url, content=INTROSPECTION_QUERY,
                                    headers={"content-type": "application/json"},
                                    timeout=6.0)
-            if r.status_code != 200:
+            # 401/403 = endpoint exists but auth-walled (api.gitlab.com, etc).
+            if r.status_code in (401, 403):
+                yield Hit(module="graphql_probe", source=path,
+                          category="fingerprint",
+                          url=url, status=HitStatus.FOUND,
+                          title=f"GraphQL endpoint at /{path} (auth required)",
+                          detail=f"GraphQL detected — HTTP {r.status_code} (auth-walled, introspection unknown)",
+                          severity=Severity.HIGH,
+                          extra={"path": path, "auth_required": True, "status": r.status_code})
+                continue
+            # Accept GraphQL on 2xx OR any status with JSON containing data/errors.
+            if r.status_code >= 500 and "json" not in r.headers.get("content-type", "").lower():
                 continue
             try:
                 data = r.json()
             except Exception:
                 continue
             if not isinstance(data, dict):
+                continue
+            # Non-2xx but JSON with GraphQL-shape fields → endpoint exists, query rejected.
+            if r.status_code != 200 and "errors" not in data and "data" not in data:
                 continue
             types = (((data.get("data") or {}).get("__schema") or {}).get("types"))
             if isinstance(types, list) and len(types) > 5:

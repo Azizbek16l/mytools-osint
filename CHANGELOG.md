@@ -2,6 +2,28 @@
 
 All notable changes to this project. Format: Keep-a-Changelog · Semver.
 
+## [4.1.1] - 2026-05-26  —  QA hotfix: graphql_probe auth-walled detection
+
+End-to-end real-user QA simulation surfaced one P1 bug and two P2 UX issues:
+
+### Fixed
+- **`graphql_probe` missed 401/403/422 responses** (P1). Endpoint like
+  `api.github.com/graphql` returns 403 (rate-limit/auth); GitLab returns 401;
+  many strict APIs return 422 with `{"errors":[...]}` JSON. The probe now
+  treats all of these as "GraphQL endpoint exists" (HIGH severity, auth-walled
+  or query-rejected). Locked in with 5 regression tests
+  (`tests/test_v41_graphql_probe.py`).
+
+### Changed
+- **Main-menu instruction** now reads `(↑↓ or shortcut to jump · ↵ to select)`
+  to make explicit that `questionary 2.1.1` requires Enter after a shortcut
+  (library quirk — shortcut keys navigate but don't auto-fire).
+
+### Known
+- First-launch of the Nuitka onefile brew binary takes ~8–12s to self-extract
+  into `/var/folders/...` cache. Subsequent invocations are instant. Use the
+  pipx install for instant cold-start.
+
 ## [4.1.0] - 2026-05-26  —  v4.1 active recon: route discovery + 6 fingerprinting modules
 
 After the v4.0 cornerstone (entity graph + auto-pivot + SIEM + AI), the

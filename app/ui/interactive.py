@@ -1861,7 +1861,7 @@ async def run_interactive(show_figlet: bool = False) -> int:
                 style=QSTYLE,
                 use_shortcuts=True,
                 qmark="",
-                instruction="(↑↓ or l/h/m/s/p/t/i/q)",
+                instruction="(↑↓ or shortcut to jump · ↵ to select)",
             ).ask_async()
             _print_keybindings(
                 ("↑↓", "navigate"), ("↵", "select"),
