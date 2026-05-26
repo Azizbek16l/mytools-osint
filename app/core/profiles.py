@@ -28,6 +28,10 @@ _TIER_B = {
     # v4.1 active recon (loud — Tier B)
     "route_discover", "subdomain_permute", "port_scan",
     "waf_detect", "cms_detect", "graphql_probe", "source_maps",
+    # v4.2 — passive (wayback/certspotter/ripestat/hackertarget) + light active
+    # (favicon_hash, subdomain_takeover). All free-API, low noise per call.
+    "favicon_hash", "wayback_urls", "certspotter", "ripestat",
+    "hackertarget", "subdomain_takeover",
 }
 
 
@@ -50,6 +54,8 @@ PROFILES: dict[str, set[str]] = {
         "asn_bgp", "email_security", "web_recon", "takeover",
         "typosquat", "threat_intel", "internetdb", "well_known",
         "web_hardening", "subdomain_brute",
+        # v4.2 passive sources
+        "certspotter", "wayback_urls", "ripestat", "hackertarget",
     },
     "red-team": {
         "domain", "ssl_tls", "http_headers", "tech_fingerprint",
@@ -61,11 +67,16 @@ PROFILES: dict[str, set[str]] = {
         # v4.1 active recon
         "route_discover", "port_scan", "waf_detect", "cms_detect",
         "graphql_probe", "source_maps",
+        # v4.2 active + passive recon
+        "favicon_hash", "wayback_urls", "certspotter", "ripestat",
+        "hackertarget", "subdomain_takeover",
     },
     "active-recon": {
         # v4.1 — just the active (loud) probes for a focused offensive scan
         "route_discover", "port_scan", "waf_detect", "cms_detect",
         "graphql_probe", "source_maps", "subdomain_brute", "subdomain_permute",
+        # v4.2 — favicon pivot + takeover check
+        "favicon_hash", "subdomain_takeover",
     },
     "blue-team": {
         # what would a defender want? exposed surface + reputation.

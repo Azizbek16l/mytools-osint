@@ -42,12 +42,32 @@ async def _call(client, call: str, resource: str) -> dict | None:
 
 
 async def _enrich_ip(ip: str) -> AsyncIterator[Hit]:
+    # Guard against private / reserved IPs — RIPE has nothing for them and
+    # would otherwise return junk-FOUND with empty AS/holder fields.
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+        if (ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local
+                or ip_obj.is_reserved or ip_obj.is_multicast):
+            yield Hit(module=NAME, source="RIPEstat", category="ip",
+                      url=f"https://stat.ripe.net/{ip}",
+                      status=HitStatus.NO_DATA,
+                      title=f"{ip} is non-public — skipped",
+                      detail="private/loopback/link-local/reserved/multicast")
+            return
+    except ValueError:
+        return  # not an IP — caller should already filter, defence-in-depth
     client = await get_client()
     ni, ov, ab = await asyncio.gather(
         _call(client, "network-info", ip),
         _call(client, "prefix-overview", ip),
         _call(client, "abuse-contact-finder", ip),
+        return_exceptions=True,
     )
+    # Coerce exceptions back to None — _call may transiently raise; we still
+    # want partial-success rather than silent total failure.
+    ni = ni if isinstance(ni, dict) else None
+    ov = ov if isinstance(ov, dict) else None
+    ab = ab if isinstance(ab, dict) else None
     asn = None
     prefix = None
     if isinstance(ni, dict):

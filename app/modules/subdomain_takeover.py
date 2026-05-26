@@ -73,9 +73,10 @@ async def _resolve_cname(host: str) -> list[str]:
 
 async def _probe(host: str) -> Hit | None:
     cnames = await _resolve_cname(host)
-    if not cnames:
-        return None
-    # Match CNAME tail against signature suffixes.
+    # v4.2.1: also probe direct-A subdomains for fingerprint matches.
+    # The most common 2026 takeover patterns (renamed GitHub Pages, deleted
+    # Vercel project) serve content via direct A records with NO CNAME —
+    # the body-fingerprint detection still works, we just need to try them.
     matched = None
     for cname in cnames:
         for suffix, fingerprint in _SIGNATURES:
@@ -84,6 +85,14 @@ async def _probe(host: str) -> Hit | None:
                 break
         if matched:
             break
+    if not matched:
+        # Fallback: if the hostname itself ends with a known-vuln SaaS suffix
+        # (github.io, vercel.app, herokuapp.com, …), check body fingerprint
+        # against the matching signature directly.
+        for suffix, fingerprint in _SIGNATURES:
+            if host.endswith("." + suffix) or host == suffix:
+                matched = (host, suffix, fingerprint)
+                break
     if not matched:
         return None
     cname, suffix, fingerprint = matched

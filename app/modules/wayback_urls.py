@@ -23,8 +23,8 @@ from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
 
 NAME = "wayback_urls"
-_MAX_URLS = 250            # cap CDX response — keep memory + UI sane
-_TIMEOUT = 25.0            # CDX can be slow on busy targets
+_MAX_URLS = 100            # cap CDX response — keep memory + UI sane (smaller = faster)
+_TIMEOUT = 12.0            # CDX is slow on busy targets — bail fast not on top of httpx retry
 _SAMPLE_PER_KIND = 5       # rows to surface as individual hits per "interesting" path kind
 
 # Heuristic "this URL is interesting" — admin paths, secrets, configs, dev files.
@@ -47,9 +47,12 @@ async def _run(query: Query) -> AsyncIterator[Hit]:
     try:
         r = await client.get(url, timeout=_TIMEOUT)
     except Exception as e:
+        # Timeouts are common — surface cleanly as NO_DATA, not noisy ERROR.
+        kind = "timeout" if "Timeout" in type(e).__name__ else "transport-error"
         yield Hit(module=NAME, source="Wayback CDX", category="osint",
-                  url=url, status=HitStatus.ERROR,
-                  detail=f"{type(e).__name__}: {e}")
+                  url=url, status=HitStatus.NO_DATA,
+                  title=f"Wayback CDX {kind} for {host}",
+                  detail=f"CDX took >{_TIMEOUT}s — try again later or use the larger limit via API directly")
         return
     if r.status_code != 200:
         yield Hit(module=NAME, source="Wayback CDX", category="osint",
