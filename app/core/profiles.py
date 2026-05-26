@@ -25,6 +25,9 @@ _TIER_B = {
     "discovery", "patterns", "adjacency", "takeover", "web_recon",
     "typosquat", "cloud_buckets", "subdomain_brute", "github_leaks",
     "malware_bazaar", "hibp_passwords",
+    # v4.1 active recon (loud — Tier B)
+    "route_discover", "subdomain_permute", "port_scan",
+    "waf_detect", "cms_detect", "graphql_probe", "source_maps",
 }
 
 
@@ -54,7 +57,15 @@ PROFILES: dict[str, set[str]] = {
         "typosquat", "threat_intel", "internetdb", "ip_extras",
         "tor_check", "patterns", "discovery", "adjacency",
         "well_known", "web_hardening", "github_leaks", "cloud_buckets",
-        "subdomain_brute",
+        "subdomain_brute", "subdomain_permute",
+        # v4.1 active recon
+        "route_discover", "port_scan", "waf_detect", "cms_detect",
+        "graphql_probe", "source_maps",
+    },
+    "active-recon": {
+        # v4.1 — just the active (loud) probes for a focused offensive scan
+        "route_discover", "port_scan", "waf_detect", "cms_detect",
+        "graphql_probe", "source_maps", "subdomain_brute", "subdomain_permute",
     },
     "blue-team": {
         # what would a defender want? exposed surface + reputation.

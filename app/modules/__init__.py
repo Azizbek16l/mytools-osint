@@ -24,6 +24,10 @@ from . import malware_bazaar as _malware_bazaar
 from . import passive_dns as _passive_dns
 from . import patterns as _patterns
 from . import pgp_keys as _pgp_keys
+from . import port_scan as _port_scan
+from . import route_discover as _route_discover
+from . import subdomain_permute as _subdomain_permute
+from . import waf_cms_graphql as _waf_cms_graphql
 from . import phone as _phone
 from . import ssl_tls as _ssl_tls
 from . import subdomain_brute as _subdomain_brute
@@ -51,6 +55,8 @@ MODULES = [
     # cyber-pro v0.3 additions
     _github_leaks, _cloud_buckets, _hibp_passwords, _malware_bazaar,
     _web_hardening, _well_known, _subdomain_brute, _passive_dns,
+    # v4.1 active recon
+    _route_discover, _subdomain_permute, _port_scan, _waf_cms_graphql,
 ]
 
 
