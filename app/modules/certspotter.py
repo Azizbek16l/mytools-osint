@@ -42,7 +42,7 @@ async def _run(query: Query) -> AsyncIterator[Hit]:
         return
     if r.status_code == 429:
         yield Hit(module=NAME, source="CertSpotter", category="dns",
-                  url=url, status=HitStatus.RATE_LIMITED,
+                  url=url, status=HitStatus.RATELIMITED,
                   detail="100 req/hour free quota exceeded — falls back to crt.sh")
         return
     if r.status_code != 200:

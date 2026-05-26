@@ -45,7 +45,7 @@ async def _run_domain(domain: str) -> AsyncIterator[Hit]:
     status, lines = await _call("hostsearch", domain)
     if status == 429:
         yield Hit(module=NAME, source="HackerTarget (hostsearch)",
-                  category="dns", status=HitStatus.RATE_LIMITED,
+                  category="dns", status=HitStatus.RATELIMITED,
                   detail="free 50-200 req/day quota exhausted")
         return
     if status != 200:
@@ -78,7 +78,7 @@ async def _run_ip(ip: str) -> AsyncIterator[Hit]:
     status, lines = await _call("reverseiplookup", ip)
     if status == 429:
         yield Hit(module=NAME, source="HackerTarget (reverseip)",
-                  category="ip", status=HitStatus.RATE_LIMITED,
+                  category="ip", status=HitStatus.RATELIMITED,
                   detail="free quota exhausted")
         return
     if status != 200:
