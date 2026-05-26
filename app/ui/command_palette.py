@@ -139,6 +139,7 @@ async def open_palette(actions: list[PaletteAction]) -> int:
         style=QSTYLE,
         qmark="/",
         use_search_filter=True,
+        use_jk_keys=False,  # questionary 2.1.1 rejects search-filter + jk together
         instruction="(type to fuzzy-filter · ↵ run · esc cancel)",
     ).ask_async()
     if pick is None or pick == "__BACK__" or not isinstance(pick, int):

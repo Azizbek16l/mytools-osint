@@ -89,3 +89,35 @@ def test_url_injection_protected_ripestat():
     from app.modules import ripestat
     src = inspect.getsource(ripestat._call)
     assert "quote(" in src, "ripestat must url-quote resource"
+
+
+# ---- v4.2.1 polish regressions from UX audit ----------------------------
+
+def test_command_palette_use_jk_keys_disabled():
+    """Regression: questionary 2.1.1 crashes if use_search_filter + jk both on."""
+    import inspect
+    from app.ui import command_palette
+    src = inspect.getsource(command_palette.open_palette)
+    # Verify the workaround is in place — must be explicitly False.
+    assert "use_jk_keys=False" in src, (
+        "palette will crash: questionary rejects search-filter + jk-keys combo"
+    )
+
+
+def test_main_menu_label_casing_no_collision():
+    """Regression: settings ('t') and theme ('T') must render different labels."""
+    from app.ui.main_menu import _ENTRIES
+    labels = [label for (_key, _act, label, _desc) in _ENTRIES]
+    assert len(set(labels)) == len(labels), \
+        f"main menu has duplicate labels — keys become indistinguishable: {labels}"
+
+
+def test_no_splash_flag_in_argparse():
+    """Regression: --no-splash was advertised but not declared."""
+    import sys
+    sys.argv = ["osint", "--no-splash", "--version"]
+    from cli import _build_parser
+    p = _build_parser()
+    # Must not raise SystemExit on --no-splash.
+    ns = p.parse_args(["--no-splash", "--version"])
+    assert ns.no_splash is True

@@ -2,9 +2,10 @@
 
 All notable changes to this project. Format: Keep-a-Changelog · Semver.
 
-## [4.2.1] - 2026-05-26  —  Security hotfix: OPSEC bypass, SSRF guard, URL injection
+## [4.2.1] - 2026-05-26  —  Security + UX hotfix sweep
 
-Driven by senior-security-engineer audit of v4.2.0. Three P0/P1 fixes:
+Driven by parallel senior-security-engineer + senior-ux-engineer + senior-qa-test-engineer
+audit of v4.2.0. Multi-track P0/P1/P2 fixes:
 
 ### Fixed
 - **[P0]** `--opsec` bypass — `favicon_hash` and `subdomain_takeover` checked
@@ -25,11 +26,31 @@ Driven by senior-security-engineer audit of v4.2.0. Three P0/P1 fixes:
 - **[P2]** Replaced `lstrip("*.")` (per-character strip, buggy) with
   `removeprefix("*.")` across all v4.2 modules.
 
-### Tests
-- 11 new regression tests in `tests/test_v42_security_fixes.py` and
-  earlier rate-limit branch (230 → 241 total).
+### UX fixes (from UX engineer audit)
+- **[P0]** Command palette CRASHED on `p` keypress — `questionary 2.1.1`
+  rejects `use_search_filter=True` without `use_jk_keys=False`. Fixed.
+- **[P0]** `--no-splash` flag was advertised but not declared in argparse
+  → `error: unrecognized arguments: --no-splash`. Now declared.
+- **[P1]** Theme picker `default=` was unset; pressing Enter immediately
+  silently clobbered the active theme back to github-dark. Now starts
+  on the current theme.
+- **[P1]** Theme picker color swatches rendered as literal
+  `[#58A6FF]██[/]` text — questionary doesn't parse Rich markup. Now
+  uses raw 24-bit ANSI escapes that questionary passes through.
+- **[P1]** Main-menu `[T]` label collision — both settings and theme
+  picker rendered `[T]`, indistinguishable. Switched to lowercase labels
+  matching the key case; theme picker shows `⇧T`.
+- **[P1]** `resolve_theme()` precedence inverted — persisted choice
+  overrode explicit `BLUETM_THEME` env. Now env wins (UNIX convention),
+  persistence is the fallback.
+- **[P2]** CHANGELOG copy bug — header said "6 themes", body said "7".
 
-## [4.2.0] - 2026-05-26  —  Smart Shell + Free Sources: single-fire menu, 6 themes, 6 new modules
+### Tests
+- 14 new regression tests (8 security + 3 UX + 3 pre-existing).
+- `conftest.py` redirects `_THEME_CONFIG_PATH` to tmpdir so user-side
+  picks don't pollute the test suite. (244 total, up from 230.)
+
+## [4.2.0] - 2026-05-26  —  Smart Shell + Free Sources: single-fire menu, 7 themes, 6 new modules
 
 Major UX + features release driven by a multi-agent /goal audit (UX engineer, QA, research).
 

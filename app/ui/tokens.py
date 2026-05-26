@@ -175,9 +175,10 @@ def resolve_theme(env_value: str | None) -> ThemeTokens:
 
     Case-insensitive; unknown names are treated as ``auto``.
     """
-    persisted = _read_persisted_theme()
-    if persisted:
-        return THEMES[persisted]
+    # Precedence: explicit env value > persisted config > auto-detect > default.
+    # (env_value passed in from cli.py reflects BLUETM_THEME; persisted is the
+    # user's last in-app pick. Env wins so `BLUETM_THEME=dracula osint` honors
+    # one-shot overrides, matching UNIX convention.)
     val = (env_value or "").strip().lower()
     if val in THEMES:
         return THEMES[val]
@@ -185,6 +186,10 @@ def resolve_theme(env_value: str | None) -> ThemeTokens:
         return LIGHT_TOKENS
     if val == "dark":
         return DARK_TOKENS
+    # Only consult persistence when no env override.
+    persisted = _read_persisted_theme()
+    if persisted:
+        return THEMES[persisted]
     detected = _detect_terminal_background()
     if detected == "light":
         return LIGHT_TOKENS

@@ -1695,28 +1695,43 @@ async def _render_modules_table(r) -> None:
 async def _action_theme_picker() -> None:
     """v4.2 theme switcher — pick from 7 palettes, persist to ~/.config."""
     from app.ui.tokens import THEMES, ACTIVE, persist_theme
-    current = ACTIVE.name  # "dark" or "light" — we cross-ref by hex to find name
     current_name = next(
-        (k for k, v in THEMES.items() if v.ACCENT == ACTIVE.ACCENT and v.BG_HINT == ACTIVE.BG_HINT),
+        (k for k, v in THEMES.items()
+         if v.ACCENT == ACTIVE.ACCENT and v.BG_HINT == ACTIVE.BG_HINT),
         "github-dark",
     )
+    # Render swatches with rich markup THEN format the Choice label.
+    # questionary doesn't parse rich tags, so we pre-render swatches via Text/console.
+    # Workaround: emit raw ANSI 24-bit color in the label string itself.
+    def _swatch(hex_color: str, ch: str = "██") -> str:
+        # hex like "#BD93F9" → ANSI 24-bit "\x1b[38;2;R;G;Bm{ch}\x1b[0m"
+        h = hex_color.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"\x1b[38;2;{r};{g};{b}m{ch}\x1b[0m"
+
+    default_label: str | None = None
     choices = []
     for name, tk in THEMES.items():
         marker = "●" if name == current_name else "○"
-        sample = f"[{tk.ACCENT}]██[/][{tk.OK}]██[/][{tk.WARN}]██[/][{tk.BAD}]██[/]"
-        choices.append(Choice(f"  {marker}  {name:<22}  {sample}", value=name))
+        sample = (_swatch(tk.ACCENT) + _swatch(tk.OK)
+                  + _swatch(tk.WARN) + _swatch(tk.BAD))
+        label = f"  {marker}  {name:<22}  {sample}"
+        choices.append(Choice(label, value=name))
+        if name == current_name:
+            default_label = label
     choices.append(Choice("  ← back (keep current)", value="__BACK__"))
     pick = await questionary.select(
         "pick a theme (saved to ~/.config/mytools-osint/theme):",
         choices=choices, style=QSTYLE, qmark="",
+        default=default_label,  # cursor starts on the active theme — prevents accidental clobber
         instruction="(↑↓ navigate · ↵ apply · ← back)",
     ).ask_async()
     if pick is None or pick == "__BACK__":
         return
     persist_theme(pick)
     console.print(
-        f"[{tokens.OK}]✓ theme set to [b]{pick}[/]; "
-        f"restart osint (or re-launch shell) to see it everywhere.[/]"
+        f"[{tokens.OK}]✓ theme saved → [b]{pick}[/]; "
+        f"restart osint to apply everywhere (most colors update on next screen).[/]"
     )
 
 

@@ -28,16 +28,18 @@ from prompt_toolkit.styles import Style
 from app.ui import tokens
 
 # (key, action_id, label, description)
+# Label matches key case so users can tell lowercase `t` (settings) apart from
+# Shift+T (theme picker). All lowercase except the explicit Shift modifier.
 _ENTRIES: list[tuple[str, str, str, str]] = [
-    ("l", "lookup",   "L", "new lookup           single prompt with auto-detect"),
-    ("h", "history",  "H", "recent history       last 50 queries · resume any"),
-    ("m", "modules",  "M", "modules              k9s-style table · health · 7d"),
-    ("s", "stats",    "S", "sites                Sherlock + WhatsMyName breakdown"),
-    ("p", "palette",  "P", "command palette      fuzzy launcher for any action"),
-    ("t", "settings", "T", "settings             API keys · Telegram · paths"),
-    ("i", "help",     "I", "info / help          keybindings, profiles, sub-commands"),
-    ("T", "theme",    "T", "theme picker         pick palette: dracula, nord, …"),
-    ("q", "exit",     "Q", "exit"),
+    ("l", "lookup",   "l", "new lookup           single prompt with auto-detect"),
+    ("h", "history",  "h", "recent history       last 50 queries · resume any"),
+    ("m", "modules",  "m", "modules              k9s-style table · health · 7d"),
+    ("s", "stats",    "s", "sites                Sherlock + WhatsMyName breakdown"),
+    ("p", "palette",  "p", "command palette      fuzzy launcher for any action"),
+    ("t", "settings", "t", "settings             API keys · Telegram · paths"),
+    ("i", "help",     "i", "info / help          keybindings, profiles, sub-commands"),
+    ("T", "theme",    "⇧T", "theme picker        pick palette: dracula, nord, …"),
+    ("q", "exit",     "q", "exit"),
 ]
 
 
