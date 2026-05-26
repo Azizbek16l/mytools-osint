@@ -43,3 +43,4 @@ nuitka-crash-report.xml
 # OS
 Thumbs.db
 .DS_Store
+dist-pypi/
