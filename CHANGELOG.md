@@ -2,6 +2,69 @@
 
 All notable changes to this project. Format: Keep-a-Changelog · Semver.
 
+## [4.1.0] - 2026-05-26  —  v4.1 active recon: route discovery + 6 fingerprinting modules
+
+After the v4.0 cornerstone (entity graph + auto-pivot + SIEM + AI), the
+user-as-expert audit surfaced one big gap: **all 32 modules were PASSIVE**.
+v4.1 adds 7 carefully-bounded ACTIVE probes — all OPSEC-aware (refuse in
+`--opsec` mode unless explicit env override).
+
+### Added — 7 active-recon modules
+
+- **route_discover** — dirsearch/ffuf-style path bruteforce. 218 curated
+  paths in 10 categories (secret-leak / vcs-leak / admin / debug / backup
+  / api-doc / graphql / auth / misc). 3-baseline soft-404 detection +
+  content-sniffing on CRITICAL hits (25 signatures: `.env` must contain `=`,
+  `.git/HEAD` must start `ref:`, swagger.json must parse as JSON) →
+  eliminates ~80% of FP on SPAs. robots.txt parsed as DISCOVERY SOURCE
+  (Disallow paths fed into candidate list).
+
+- **subdomain_permute** — altdns-style. Pulls discovered SUBDOMAIN entities
+  from the entity graph, mixes with 40 mutation patterns
+  (`dev-X` / `X-staging` / `X.beta` / `prod-X` / …), DNS-checks each.
+  Surfaces pre-prod environments that are often the soft underbelly.
+
+- **port_scan** — top-50 TCP-connect + 256B banner grab. Concurrent
+  asyncio.open_connection w/ Semaphore(20). Database / admin ports
+  (3306, 3389, 5432, 6379, 27017, 9200, 8086, 5601, 11211, …) get HIGH
+  severity. Maps to PORT entities + EXPOSES_PORT edges in graph.
+
+- **waf_detect** — 11 WAF/CDN signatures (Cloudflare, Akamai, Fastly,
+  Imperva, F5 BIG-IP, Sucuri, AWS WAF, Azure Front Door, Barracuda,
+  Wallarm). Header-based fingerprint only.
+
+- **cms_detect** — WordPress (meta generator + wp-login.php probe),
+  Drupal (CHANGELOG.txt version sniff), Joomla (admin XML manifest).
+
+- **graphql_probe** — POST introspection query to /graphql, /api/graphql,
+  /v1/graphql, /v2/graphql, /graphiql. HIGH severity if introspection
+  ENABLED; MEDIUM if endpoint exists but introspection blocked.
+
+- **source_maps** — HEAD probe for 13 common bundler source-map paths
+  (webpack, Next.js, Vite, CRA). MEDIUM — leaks project source structure.
+
+### Added — new profile
+- **active-recon** — focused offensive profile with the 7 active modules
+  + subdomain_brute + subdomain_permute. 9 modules total.
+
+### Changed
+- `red-team` profile expanded to include all 7 new active modules.
+- Module count: 32 → **39**
+- Profile count: 11 → **12**
+
+### Security note
+All active modules refuse to run in `--opsec` mode by default.
+Override per-module: `OSINT_ROUTE_DISCOVER_OVER_TOR=1`,
+`OSINT_PORT_SCAN_OVER_TOR=1`. Reasoning: high-volume probing through Tor
+is both slow AND loud at the exit node. Use a dedicated VPS for
+active scans behind OPSEC.
+
+### Design review credits
+Per @senior-security-engineer's input baked into route_discover:
+3 baselines (not 1), median-length comparison, content-sniff for CRITICAL
+hits, robots.txt as discovery source not boundary, 429-aware concurrency.
+
+
 ## [4.0.0] - 2026-05-26  —  v4.0 cornerstone: entity graph + AI + plugins
 
 Major version. Re-imagined from a one-shot scanner into a **pivot-capable
