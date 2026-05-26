@@ -290,7 +290,15 @@ def cmd_graph(argv: list[str]) -> int:
                 return 0
 
             if sub == "forget" and len(argv) >= 3:
-                kind_str, value = argv[1], argv[2]
+                kind_str, value = argv[1].lower(), argv[2]
+                from app.core.entities import EntityType
+                try:
+                    EntityType(kind_str)
+                except ValueError:
+                    valid = ", ".join(sorted(t.value for t in EntityType))
+                    print(f"  unknown entity kind '{argv[1]}'.\n  valid: {valid}",
+                          file=sys.stderr)
+                    return 2
                 n = await db.entity_forget(kind_str, value)
                 print(f"  forgot {n} entity (cascade-deleted edges)")
                 return 0
