@@ -65,6 +65,75 @@ LIGHT_TOKENS = ThemeTokens(
     MUTED_BG="#F6F8FA",
 )
 
+# ---- Theme registry (v4.2) -------------------------------------------------
+# Named palettes the user can pick in-app via T → theme picker, or with
+# ``BLUETM_THEME=<name>`` env var. Adding a theme = adding one dict entry.
+
+DRACULA_TOKENS = ThemeTokens(
+    name="dark",
+    ACCENT="#BD93F9", OK="#50FA7B", WARN="#F1FA8C", BAD="#FF5555",
+    FG="#F8F8F2", DIM="#6272A4", BG_HINT="#282A36", MUTED_BG="#44475A",
+)
+
+NORD_TOKENS = ThemeTokens(
+    name="dark",
+    ACCENT="#88C0D0", OK="#A3BE8C", WARN="#EBCB8B", BAD="#BF616A",
+    FG="#ECEFF4", DIM="#4C566A", BG_HINT="#2E3440", MUTED_BG="#3B4252",
+)
+
+TOKYO_NIGHT_TOKENS = ThemeTokens(
+    name="dark",
+    ACCENT="#7AA2F7", OK="#9ECE6A", WARN="#E0AF68", BAD="#F7768E",
+    FG="#C0CAF5", DIM="#565F89", BG_HINT="#1A1B26", MUTED_BG="#24283B",
+)
+
+CATPPUCCIN_TOKENS = ThemeTokens(
+    name="dark",
+    ACCENT="#89B4FA", OK="#A6E3A1", WARN="#F9E2AF", BAD="#F38BA8",
+    FG="#CDD6F4", DIM="#6C7086", BG_HINT="#1E1E2E", MUTED_BG="#313244",
+)
+
+HIGH_CONTRAST_TOKENS = ThemeTokens(
+    name="dark",
+    ACCENT="#5DADE2", OK="#58D68D", WARN="#F5B041", BAD="#EC7063",
+    FG="#FFFFFF", DIM="#A6ACAF", BG_HINT="#000000", MUTED_BG="#1B1B1B",
+)
+
+THEMES: dict[str, ThemeTokens] = {
+    "github-dark":      DARK_TOKENS,
+    "github-light":     LIGHT_TOKENS,
+    "dracula":          DRACULA_TOKENS,
+    "nord":             NORD_TOKENS,
+    "tokyo-night":      TOKYO_NIGHT_TOKENS,
+    "catppuccin-mocha": CATPPUCCIN_TOKENS,
+    "high-contrast":    HIGH_CONTRAST_TOKENS,
+}
+
+# Persistence path (read on import, written when user picks a theme).
+_THEME_CONFIG_PATH = os.path.expanduser("~/.config/mytools-osint/theme")
+
+
+def _read_persisted_theme() -> str | None:
+    """If the user previously picked a theme via the in-app switcher, honour it."""
+    try:
+        with open(_THEME_CONFIG_PATH) as f:
+            name = f.read().strip()
+        return name if name in THEMES else None
+    except OSError:
+        return None
+
+
+def persist_theme(name: str) -> None:
+    """Write the picked theme name so it survives across launches."""
+    if name not in THEMES:
+        return
+    try:
+        os.makedirs(os.path.dirname(_THEME_CONFIG_PATH), exist_ok=True)
+        with open(_THEME_CONFIG_PATH, "w") as f:
+            f.write(name)
+    except OSError:
+        pass
+
 
 # ---- Resolver --------------------------------------------------------------
 
@@ -95,15 +164,23 @@ def _detect_terminal_background() -> ThemeName | None:
 
 
 def resolve_theme(env_value: str | None) -> ThemeTokens:
-    """Pick :data:`LIGHT_TOKENS` or :data:`DARK_TOKENS` from an env value.
+    """Pick a palette from the THEMES registry (v4.2) or fall back to legacy logic.
 
-    * ``"light"`` / ``"dark"`` — explicit, used verbatim.
-    * ``"auto"`` or ``None`` / empty — detect from ``COLORFGBG`` env var;
-      fall back to dark.
+    Resolution order:
+      1. Persisted choice in ``~/.config/mytools-osint/theme`` (user-picked).
+      2. ``BLUETM_THEME`` env value — accepts any THEMES key (``dracula``,
+         ``nord``…) or legacy ``"light"`` / ``"dark"`` / ``"auto"``.
+      3. ``COLORFGBG`` detection.
+      4. Dark default.
 
-    Case-insensitive; unknown values are treated as ``auto``.
+    Case-insensitive; unknown names are treated as ``auto``.
     """
+    persisted = _read_persisted_theme()
+    if persisted:
+        return THEMES[persisted]
     val = (env_value or "").strip().lower()
+    if val in THEMES:
+        return THEMES[val]
     if val == "light":
         return LIGHT_TOKENS
     if val == "dark":

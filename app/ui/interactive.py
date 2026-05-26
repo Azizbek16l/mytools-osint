@@ -1692,6 +1692,34 @@ async def _render_modules_table(r) -> None:
     console.print()
 
 
+async def _action_theme_picker() -> None:
+    """v4.2 theme switcher — pick from 7 palettes, persist to ~/.config."""
+    from app.ui.tokens import THEMES, ACTIVE, persist_theme
+    current = ACTIVE.name  # "dark" or "light" — we cross-ref by hex to find name
+    current_name = next(
+        (k for k, v in THEMES.items() if v.ACCENT == ACTIVE.ACCENT and v.BG_HINT == ACTIVE.BG_HINT),
+        "github-dark",
+    )
+    choices = []
+    for name, tk in THEMES.items():
+        marker = "●" if name == current_name else "○"
+        sample = f"[{tk.ACCENT}]██[/][{tk.OK}]██[/][{tk.WARN}]██[/][{tk.BAD}]██[/]"
+        choices.append(Choice(f"  {marker}  {name:<22}  {sample}", value=name))
+    choices.append(Choice("  ← back (keep current)", value="__BACK__"))
+    pick = await questionary.select(
+        "pick a theme (saved to ~/.config/mytools-osint/theme):",
+        choices=choices, style=QSTYLE, qmark="",
+        instruction="(↑↓ navigate · ↵ apply · ← back)",
+    ).ask_async()
+    if pick is None or pick == "__BACK__":
+        return
+    persist_theme(pick)
+    console.print(
+        f"[{tokens.OK}]✓ theme set to [b]{pick}[/]; "
+        f"restart osint (or re-launch shell) to see it everywhere.[/]"
+    )
+
+
 async def _press_enter() -> None:
     """Pause until the user acknowledges — used after read-only screens."""
     try:
@@ -1831,42 +1859,10 @@ async def run_interactive(show_figlet: bool = False) -> int:
     await db.connect()
     try:
         while True:
-            # Subtle section header (no closing divider — questionary clears its own area)
-            header = Text("   ")
-            header.append("── ", style=tokens.DIM)
-            header.append("main menu", style=f"bold {tokens.FG}")
-            header.append(" " + ("─" * 70), style=tokens.DIM)
-            console.print(header)
-            console.print()
-            choice = await questionary.select(
-                "",
-                choices=[
-                    Choice("  [L]  new lookup           single prompt with auto-detect",
-                           value="lookup",   shortcut_key="l"),
-                    Choice("  [H]  recent history       last 50 queries · resume any",
-                           value="history",  shortcut_key="h"),
-                    Choice("  [M]  modules              k9s-style table · health · 7d",
-                           value="modules",  shortcut_key="m"),
-                    Choice("  [S]  sites                Sherlock + WhatsMyName breakdown",
-                           value="stats",    shortcut_key="s"),
-                    Choice("  [P]  command palette      fuzzy launcher for any action",
-                           value="palette",  shortcut_key="p"),
-                    Choice("  [T]  settings             API keys · Telegram · paths",
-                           value="settings", shortcut_key="t"),
-                    Choice("  [I]  info / help          keybindings, profiles, sub-commands",
-                           value="help",     shortcut_key="i"),
-                    Choice("  [Q]  exit",
-                           value="exit",     shortcut_key="q"),
-                ],
-                style=QSTYLE,
-                use_shortcuts=True,
-                qmark="",
-                instruction="(↑↓ or shortcut to jump · ↵ to select)",
-            ).ask_async()
-            _print_keybindings(
-                ("↑↓", "navigate"), ("↵", "select"),
-                ("l/h/m/s/p/t/i", "jump"), ("q", "quit"),
-            )
+            # v4.2: single-fire main menu (prompt_toolkit Application). The key
+            # fires INSTANTLY — no Enter required, matching lazygit / k9s / btop.
+            from app.ui.main_menu import pick_action
+            choice = await pick_action()
             if choice in (None, "exit"):
                 console.print(f"\n[{tokens.DIM}]bye — {BRAND}[/]\n")
                 return 0
@@ -1901,6 +1897,8 @@ async def run_interactive(show_figlet: bool = False) -> int:
             elif choice == "help":
                 await show_help("main")
                 await _press_enter()
+            elif choice == "theme":
+                await _action_theme_picker()
     except (KeyboardInterrupt, EOFError):
         console.print(f"\n[{tokens.DIM}]bye — {BRAND}[/]\n")
         return 130

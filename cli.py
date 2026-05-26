@@ -930,7 +930,46 @@ def _handle_diff_subcommand(argv: list[str]) -> int:
     return asyncio.run(_run())
 
 
+def _print_splash() -> bool:
+    """Tiny pre-import splash (v4.2). Kills the 8-12s Nuitka cold-start dead time
+    by painting *something* within 60ms — before any heavy imports run.
+
+    Returns True if a splash was painted (caller should erase it at end-of-startup).
+    Skipped in non-TTY, when --no-splash / --no-banner / --version / --help / -h
+    is present, or for piped subcommands where chatty stdout would corrupt output.
+    """
+    try:
+        if not sys.stdout.isatty():
+            return False
+        argv = sys.argv[1:]
+        bad = {"--no-splash", "--no-banner", "--version", "--help", "-h",
+               "--format", "--out", "--list-modules", "--list-profiles",
+               "--list-stats", "--bulk"}
+        if any(a in bad for a in argv):
+            return False
+        # Subcommands that produce machine-readable output → no splash.
+        if argv and argv[0] in {"completion", "mcp", "export", "graph", "cache"}:
+            return False
+        sys.stdout.write("\033[?25l   loading mytools-osint…\r")
+        sys.stdout.flush()
+        return True
+    except Exception:
+        return False
+
+
+def _clear_splash(painted: bool) -> None:
+    """Erase the splash line + restore cursor — call once heavy imports finish."""
+    if not painted:
+        return
+    try:
+        sys.stdout.write("\033[2K\033[?25h\r")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _splash = _print_splash()
     if sys.platform == "win32":
         for _stream in (sys.stdout, sys.stderr):
             try:
@@ -938,6 +977,7 @@ def main(argv: list[str] | None = None) -> int:
             except (AttributeError, OSError):
                 pass
     from app import __version__ as _ver
+    _clear_splash(_splash)
     raw = list(sys.argv[1:] if argv is None else argv)
     # Universal sub-command --help / -h handling: print usage, return 0.
     # Each entry: command-name → one-line summary + multi-line help body.

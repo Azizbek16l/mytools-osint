@@ -2,6 +2,45 @@
 
 All notable changes to this project. Format: Keep-a-Changelog · Semver.
 
+## [4.2.0] - 2026-05-26  —  Smart Shell + Free Sources: single-fire menu, 6 themes, 6 new modules
+
+Major UX + features release driven by a multi-agent /goal audit (UX engineer, QA, research).
+
+### UX overhaul (driven by senior-ux-engineer audit)
+- **Single-fire main menu** — `prompt_toolkit.Application` replaces
+  `questionary.select` for the main menu. Pressing `q` / `i` / `l` / `m`
+  fires *instantly* — no Enter required, matching lazygit / k9s / btop / claude code.
+  (`app/ui/main_menu.py`)
+- **7 themes** in a new `THEMES` registry: `github-dark` (default),
+  `github-light`, `dracula`, `nord`, `tokyo-night`, `catppuccin-mocha`,
+  `high-contrast`. In-app **T → theme picker** persists choice to
+  `~/.config/mytools-osint/theme`.
+- **Cold-start splash** prints `loading mytools-osint…` within 60ms of
+  invocation — kills the 8–12s Nuitka onefile dead-time first-impression.
+
+### New modules (6, all free, no API keys required)
+- **`favicon_hash`** — computes Shodan's MMH3 favicon hash; emits a
+  ready-to-click `shodan.io/search?query=http.favicon.hash:N` URL. Best
+  origin-IP-behind-CDN trick on the internet.
+- **`wayback_urls`** — Wayback CDX server query for historical URLs +
+  forgotten subdomains. Surfaces deprecated admin paths, leaked params,
+  staging hostnames.
+- **`certspotter`** — independent CT-log subdomain enumeration; crt.sh
+  fallback (100 req/hr free quota).
+- **`ripestat`** — authoritative ASN / prefix / abuse-contact lookups
+  via RIPE's no-key Data API.
+- **`hackertarget`** — multi-tool free-tier API: hostsearch (subdomain
+  enum cross-check) + reverse-IP (find co-hosted virtual hosts).
+- **`subdomain_takeover`** — CNAME chain check against 24 curated
+  fingerprints from `can-i-take-over-xyz` (Vercel, Heroku, GitHub Pages,
+  Netlify, Surge, Pantheon, Webflow, Ghost, Kinsta, …). CRITICAL severity
+  when body matches the service's "not-claimed" fingerprint.
+
+### Audit drove these v4.3+ items (not in this release)
+- Workspaces (per-investigation SQLite + provenance), correlation rules
+  YAML engine, full Wappalyzer-Next-style tech fingerprint expand,
+  Photon-style crawler (#57). All ranked but deferred for scope.
+
 ## [4.1.1] - 2026-05-26  —  QA hotfix: graphql_probe auth-walled detection
 
 End-to-end real-user QA simulation surfaced one P1 bug and two P2 UX issues:

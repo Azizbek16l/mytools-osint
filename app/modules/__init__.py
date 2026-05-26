@@ -28,6 +28,12 @@ from . import port_scan as _port_scan
 from . import route_discover as _route_discover
 from . import subdomain_permute as _subdomain_permute
 from . import waf_cms_graphql as _waf_cms_graphql
+from . import favicon_hash as _favicon_hash
+from . import wayback_urls as _wayback_urls
+from . import certspotter as _certspotter
+from . import ripestat as _ripestat
+from . import hackertarget as _hackertarget
+from . import subdomain_takeover as _subdomain_takeover
 from . import phone as _phone
 from . import ssl_tls as _ssl_tls
 from . import subdomain_brute as _subdomain_brute
@@ -57,6 +63,9 @@ MODULES = [
     _web_hardening, _well_known, _subdomain_brute, _passive_dns,
     # v4.1 active recon
     _route_discover, _subdomain_permute, _port_scan, _waf_cms_graphql,
+    # v4.2 — free passive sources + favicon pivot + subdomain takeover
+    _favicon_hash, _wayback_urls, _certspotter, _ripestat, _hackertarget,
+    _subdomain_takeover,
 ]
 
 
