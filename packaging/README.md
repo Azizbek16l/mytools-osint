@@ -17,7 +17,7 @@ PR/bucket-update after each release.
 | apt        | `sudo apt install ./mytools-osint_0.2.0_amd64.deb` (download from Releases first) |
 | dnf/yum    | `sudo dnf install https://github.com/Azizbek16l/mytools-osint/releases/download/v0.2.0/mytools-osint-0.2.0-1.x86_64.rpm` |
 | AppImage   | `curl -L .../mytools-osint-0.2.0-x86_64.AppImage -o osint && chmod +x osint` |
-| Docker     | `docker run --rm ghcr.io/azizbek16l/osint:latest torvalds` |
+| Docker     | `docker run --rm ghcr.io/azizbek16l/osint:latest temur` |
 | Direct bin | `curl -L .../osint-linux-x86_64 -o osint && chmod +x osint && sudo mv osint /usr/local/bin/` |
 
 ## Phase 1 — ship today
@@ -75,7 +75,7 @@ pipx install "mytools-osint[gui]"     # CLI + Qt GUI
 - Image: `ghcr.io/Azizbek16l/osint:latest`
 - Usage:
   ```
-  docker run --rm ghcr.io/Azizbek16l/osint:latest torvalds
+  docker run --rm ghcr.io/Azizbek16l/osint:latest temur
   ```
 
 ### npm wrapper (cross-platform via npx)

@@ -1,15 +1,15 @@
 """mytools-osint CLI — `osint` command, no Qt dependency.
 
 Examples:
-  osint torvalds                         auto-detect kind from value
+  osint temur                         auto-detect kind from value
   osint satya@microsoft.com              email lookup (breach + Holehe + derived)
   osint +998 90 123 45 67                phone (libphonenumber + Telegram MTProto)
   osint @durov                           Telegram username via MTProto
   osint github.com                       domain (crt.sh + DNS + HackerTarget + urlscan)
   osint 8.8.8.8                          IP (rDNS + IPinfo)
 
-  osint --kind username torvalds         force kind
-  osint torvalds --json --out r.json     machine-readable output
+  osint --kind username temur         force kind
+  osint temur --json --out r.json     machine-readable output
   osint --list-modules                   show registered modules
   osint --list-stats                     show site dataset breakdown
   osint --version
@@ -185,7 +185,7 @@ def _print_no_arg_panel(st: Style, sink) -> None:
     rows = [
         f"  {st.green('osint <value>')}                          auto-detect kind",
         f"  {st.green('osint --kind email')} satya@microsoft.com explicit kind",
-        f"  {st.green('osint torvalds --json --out')} r.json     machine-readable",
+        f"  {st.green('osint temur --json --out')} r.json     machine-readable",
         f"  {st.green('osint --list-modules')}                   what's loaded",
         f"  {st.green('osint --list-stats')}                     site dataset breakdown",
         f"  {st.green('osint --version')}                        version + banner",
@@ -194,7 +194,7 @@ def _print_no_arg_panel(st: Style, sink) -> None:
     ]
     _box(f"osint — by {BRAND}", rows, st, sink, color="cyan")
     print(file=sink)
-    print(st.dim("  Try: ") + st.green("osint torvalds") + st.dim("  or  ")
+    print(st.dim("  Try: ") + st.green("osint temur") + st.dim("  or  ")
           + st.green("osint --help"), file=sink)
 
 

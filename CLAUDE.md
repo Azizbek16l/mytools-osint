@@ -85,7 +85,7 @@ copy .env.example .env
 python main.py
 
 # run CLI
-python cli.py torvalds                 # auto-detect kind
+python cli.py temur                 # auto-detect kind
 python cli.py --kind email me@x.com
 python cli.py --kind phone +998948241222 --json --out report.json
 
@@ -99,7 +99,7 @@ python -m ruff check .
 $env:QT_QPA_PLATFORM='offscreen'; python scripts/smoke_test.py
 
 # live probe via the runner (one-off, network) — auto-detects kind
-python scripts/live_probe.py torvalds
+python scripts/live_probe.py temur
 python scripts/live_probe.py me@example.com
 python scripts/live_probe.py "+998948241222"
 

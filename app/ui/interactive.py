@@ -308,7 +308,7 @@ def _render_header(query: Query, done: bool, elapsed_ms: int,
 
     Format::
 
-        ● Scanning   torvalds          [USERNAME] · 6 modules · 18s elapsed
+        ● Scanning   temur             [USERNAME] · 6 modules · 18s elapsed
 
     On completion the spinner switches to ``ICON_OK`` and the label flips to
     ``Scanned``. The elapsed-time formatter keeps the digit count steady
@@ -842,7 +842,7 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
     console.print(hint)
     examples = Text("   ")
     examples.append("examples:  ", style=tokens.DIM)
-    for e in ("torvalds", "satya@microsoft.com", "+998 90 123 45 67", "@durov", "github.com"):
+    for e in ("temur", "satya@microsoft.com", "+998 90 123 45 67", "@durov", "github.com"):
         examples.append(e, style=tokens.ACCENT)
         examples.append("   ", style=tokens.DIM)
     console.print(examples)

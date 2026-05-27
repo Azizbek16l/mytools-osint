@@ -258,14 +258,14 @@ pipx install mytools-osint
 ### Docker
 
 ```bash
-docker run --rm ghcr.io/azizbek16l/osint:latest torvalds
+docker run --rm ghcr.io/azizbek16l/osint:latest temur
 ```
 
 ## Quick start
 
 ```bash
 osint                            # interactive menu (arrow keys)
-osint torvalds                   # auto-detect: username
+osint temur                   # auto-detect: username
 osint me@example.com             # email + breach + derived
 osint +998948241222              # phone + Telegram MTProto
 osint marsits.uz                 # domain + SSL + headers + tech + DNS + crt.sh
