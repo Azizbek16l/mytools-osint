@@ -48,7 +48,10 @@ cd "$TMPDIR"
 
 echo "  ↓ $ASSET …"
 curl -fsSL -o osint "$BASE/$ASSET"
-if ! curl -fsSL -o SHA256SUMS "$BASE/SHA256SUMS"; then
+# SHA256SUMS file is published as `SHA256SUMS-vX.Y.Z` per release; fall back
+# to plain `SHA256SUMS` for older releases.
+if ! curl -fsSL -o SHA256SUMS "$BASE/SHA256SUMS-$TAG" \
+     && ! curl -fsSL -o SHA256SUMS "$BASE/SHA256SUMS"; then
   echo "  ⚠ SHA256SUMS not in release — installing UNVERIFIED" >&2
 else
   expected=$(grep -E " [*]?${ASSET}\$" SHA256SUMS | awk '{print $1}')

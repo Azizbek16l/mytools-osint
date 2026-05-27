@@ -3,7 +3,7 @@
 Examples:
   osint torvalds                         auto-detect kind from value
   osint satya@microsoft.com              email lookup (breach + Holehe + derived)
-  osint +1 415 555 0143                  phone (libphonenumber + Telegram MTProto)
+  osint +998 90 123 45 67                phone (libphonenumber + Telegram MTProto)
   osint @durov                           Telegram username via MTProto
   osint github.com                       domain (crt.sh + DNS + HackerTarget + urlscan)
   osint 8.8.8.8                          IP (rDNS + IPinfo)
