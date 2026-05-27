@@ -836,61 +836,80 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
         suggest_slash_for_typo,
     )
 
-    console.print()
-    hint = Text("   ")
-    hint.append("what are you looking for?", style=f"bold {tokens.FG}")
-    console.print(hint)
-    examples = Text("   ")
-    examples.append("examples:  ", style=tokens.DIM)
-    for e in ("temur", "satya@microsoft.com", "+998 90 123 45 67", "@durov", "github.com"):
-        examples.append(e, style=tokens.ACCENT)
-        examples.append("   ", style=tokens.DIM)
-    console.print(examples)
-    tips = Text("   ")
-    tips.append("tab", style=f"bold {tokens.ACCENT}")
-    tips.append(" complete  ·  ", style=tokens.DIM)
-    tips.append("→", style=f"bold {tokens.ACCENT}")
-    tips.append(" accept ghost text  ·  ", style=tokens.DIM)
-    tips.append("Ctrl-R", style=f"bold {tokens.ACCENT}")
-    tips.append(" search history  ·  ", style=tokens.DIM)
-    tips.append("/help", style=f"bold {tokens.ACCENT}")
-    tips.append(" for commands", style=tokens.DIM)
-    console.print(tips)
-    console.print()
+    # v4.3: the pre-prompt block was three lines (heading + examples + tips).
+    # We print the examples + tips ONCE per session (when no history yet),
+    # then rely on the always-visible bottom toolbar to surface affordances
+    # on every subsequent prompt — exactly like Claude Code.
+    history = build_history()
+    _has_any_history = any(True for _ in history.load_history_strings())
+    if not _has_any_history and not _CHAT_STATE.get("_pre_prompt_shown"):
+        _CHAT_STATE["_pre_prompt_shown"] = True
+        console.print()
+        examples = Text("   ")
+        examples.append("examples:  ", style=tokens.DIM)
+        for e in ("temur", "satya@microsoft.com", "+998 90 123 45 67", "@durov", "github.com"):
+            examples.append(e, style=tokens.ACCENT)
+            examples.append("   ", style=tokens.DIM)
+        console.print(examples)
+        tips = Text("   ")
+        for label, key in (("Tab", "complete"), ("→", "ghost text"),
+                           ("Ctrl-R", "history"), ("/help", "commands"),
+                           ("/quit", "exit")):
+            tips.append(label, style=f"bold {tokens.ACCENT}")
+            tips.append(f" {key}  ·  ", style=tokens.DIM)
+        console.print(tips)
+        console.print()
 
     r = runner()
-    history = build_history()
+    # `history` was built above when deciding whether to render the
+    # session-intro block. Reuse the same FileHistory instance.
 
-    # PromptSession bottom_toolbar — keep identical to the pre-existing
-    # implementation so live kind inference and brand colours don't drift.
+    # PromptSession bottom_toolbar — v4.3 carries session state too: shows
+    # current theme accent, active profile, opsec/explain toggles, plus the
+    # live kind inference. Empty input → slash command discovery cue.
     def _toolbar_for(buf_text: str) -> FormattedText:
         v = (buf_text or "").strip()
+        # Right-side: session state pill. Built once per refresh.
+        state_bits: list[tuple[str, str]] = []
+        if _CHAT_STATE.get("profile"):
+            state_bits.append(("fg:#58a6ff bold", f"  profile:{_CHAT_STATE['profile']}"))
+        if _CHAT_STATE.get("opsec"):
+            state_bits.append(("fg:#d29922 bold", "  ⚑opsec"))
+        if _CHAT_STATE.get("explain"):
+            state_bits.append(("fg:#3fb950 bold", "  🤖explain"))
+        # Left-side: input-state hint.
         if not v:
-            return FormattedText([
-                ("fg:#6e7681", "  start typing — kind is inferred live"),
-            ])
-        if v.startswith("/"):
-            return FormattedText([
+            left = [
+                ("fg:#6e7681", "  type a "),
+                ("fg:#c9d1d9 bold", "target"),
+                ("fg:#6e7681", " (auto-detect) or "),
+                ("fg:#58a6ff bold", "/help · /theme · /profile · /opsec · /quit"),
+            ]
+        elif v.startswith("/"):
+            left = [
                 ("fg:#58a6ff bold", "  /command"),
                 ("fg:#6e7681", " — Tab to complete, Enter to run"),
-            ])
-        kind = kind_override or _auto_kind(v)
-        if kind is None:
-            return FormattedText([
-                ("fg:#d29922", "  AMBIGUOUS"),
-                ("fg:#6e7681", " — disambiguator will appear after Enter"),
-            ])
-        n_modules = len(r.modules_for(kind))
-        return FormattedText([
-            ("fg:#3fb950 bold", f"  [{kind.value.upper()}]"),
-            ("fg:#6e7681", "  routes to "),
-            ("fg:#c9d1d9 bold", str(n_modules)),
-            ("fg:#6e7681", " module(s)  ·  press "),
-            ("fg:#58a6ff bold", "Enter"),
-            ("fg:#6e7681", " to probe, "),
-            ("fg:#58a6ff bold", "Ctrl-C"),
-            ("fg:#6e7681", " to cancel"),
-        ])
+            ]
+        else:
+            kind = kind_override or _auto_kind(v)
+            if kind is None:
+                left = [
+                    ("fg:#d29922", "  AMBIGUOUS"),
+                    ("fg:#6e7681", " — picker appears after Enter"),
+                ]
+            else:
+                n_modules = len(r.modules_for(kind))
+                left = [
+                    ("fg:#3fb950 bold", f"  [{kind.value.upper()}]"),
+                    ("fg:#6e7681", "  → "),
+                    ("fg:#c9d1d9 bold", str(n_modules)),
+                    ("fg:#6e7681", " modules · "),
+                    ("fg:#58a6ff bold", "Enter"),
+                    ("fg:#6e7681", " to scan, "),
+                    ("fg:#58a6ff bold", "Ctrl-C"),
+                    ("fg:#6e7681", " to cancel"),
+                ]
+        return FormattedText(left + state_bits)
 
     session: PromptSession[str] = PromptSession(
         message=FormattedText([("fg:#58a6ff bold", "❯ ")]),
@@ -899,7 +918,10 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
         history=history,
         auto_suggest=AutoSuggestFromHistory(),
         completer=build_completer(history),
-        complete_while_typing=False,   # Tab-only — don't fight the ghost suggestion
+        # v4.3: live popup completions for slash commands + history.
+        # The AutoSuggestFromHistory ghost text is rendered to the *right*
+        # of the cursor; the popup shows below — they don't collide.
+        complete_while_typing=True,
         enable_history_search=True,    # binds Ctrl-R natively
         key_bindings=build_key_bindings(),
         multiline=False,
@@ -964,6 +986,25 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
                 )
                 return await action_lookup(db)
             return await action_lookup(db, kind_override=kind)
+        # ---- v4.3 chat-shell slash commands -----------------------------
+        if action.action == "theme":
+            await _action_theme_picker()
+            return await action_lookup(db)
+        if action.action == "profile":
+            await _slash_profile(action.arg)
+            return await action_lookup(db)
+        if action.action == "graph":
+            await _slash_graph(action.arg)
+            return await action_lookup(db)
+        if action.action == "opsec":
+            _slash_opsec_toggle(action.arg)
+            return await action_lookup(db)
+        if action.action == "explain":
+            _slash_explain_toggle()
+            return await action_lookup(db)
+        if action.action == "export":
+            await _slash_export(db, action.arg)
+            return await action_lookup(db)
         # unknown — print the dispatcher's did-you-mean hint and loop
         if action.message:
             console.print(f"[{tokens.WARN}]{action.message}[/]")
@@ -996,7 +1037,17 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
             return True
     query = Query(kind=kind, value=value)
     hits, elapsed_ms = await run_query(db, query)
-    return await after_results_menu(db, query, hits, elapsed_ms)
+    # v4.3: stash for /export, then loop directly back to the prompt instead
+    # of detouring through after_results_menu. Claude-Code style: the output
+    # IS the report; further actions go through slash commands.
+    _CHAT_STATE["last_query"] = query
+    _CHAT_STATE["last_hits"] = list(hits)
+    _CHAT_STATE["last_elapsed_ms"] = elapsed_ms
+    # Quick footer cue so users discover the slash commands.
+    console.print(
+        f"   [{tokens.DIM}]/export html · md · json  ·  /graph show {kind.value} {value}  ·  type a new target to continue[/]"
+    )
+    return await action_lookup(db)
 
 
 async def _run_multi_target(
@@ -1692,6 +1743,124 @@ async def _render_modules_table(r) -> None:
     console.print()
 
 
+# ============================================================================
+# v4.3 chat-shell slash handlers — keep them small + chained-friendly
+# ============================================================================
+
+# Session-level state carried across consecutive prompts. Survives /clear but
+# resets on process exit. Read by action_lookup → _stream_run via env vars.
+_CHAT_STATE: dict[str, object] = {
+    "profile": None,          # str | None — applied to next scan if set
+    "explain": False,         # bool — adds --explain on next scan
+    "opsec":   False,         # bool — sets OSINT_OPSEC=1 for next scan
+    "last_query": None,       # Query | None — used by /export
+    "last_hits":  None,       # list[Hit] | None
+    "last_elapsed_ms": 0,
+}
+
+
+async def _slash_profile(arg: str) -> None:
+    """`/profile` — list / set / clear the per-session default profile."""
+    from app.core.profiles import PROFILES
+    a = (arg or "").strip().lower()
+    if not a or a == "list":
+        cur = _CHAT_STATE.get("profile") or "(none)"
+        console.print(f"   [{tokens.DIM}]current profile:[/] [{tokens.ACCENT}]{cur}[/]")
+        console.print(f"   [{tokens.DIM}]available:[/]")
+        for name in PROFILES:
+            console.print(f"     [{tokens.FG}]{name}[/]  [{tokens.DIM}]· {len(PROFILES[name])} modules[/]")
+        return
+    if a in ("off", "none", "clear", "-"):
+        _CHAT_STATE["profile"] = None
+        console.print(f"   [{tokens.OK}]✓ profile cleared[/]")
+        return
+    if a not in PROFILES:
+        from difflib import get_close_matches
+        sug = get_close_matches(a, list(PROFILES.keys()), n=2, cutoff=0.4)
+        hint = f" — did you mean: {', '.join(sug)}?" if sug else ""
+        console.print(f"   [{tokens.BAD}]unknown profile {a!r}[/]{hint}")
+        return
+    _CHAT_STATE["profile"] = a
+    console.print(f"   [{tokens.OK}]✓ profile set →[/] [{tokens.ACCENT}]{a}[/] [{tokens.DIM}]· applies to next scan[/]")
+
+
+async def _slash_graph(arg: str) -> None:
+    """`/graph [show|stats|export|forget] [args]` — inline entity-graph ops."""
+    from app.features.graph import cmd_graph
+    parts = (arg or "stats").strip().split() or ["stats"]
+    try:
+        await cmd_graph(parts)
+    except SystemExit:
+        pass  # cmd_graph may sys.exit on error — keep the prompt alive
+    except Exception as e:
+        console.print(f"   [{tokens.BAD}]graph error:[/] {type(e).__name__}: {e}")
+
+
+def _slash_opsec_toggle(arg: str) -> None:
+    """`/opsec [on|off]` — set the per-session OPSEC flag."""
+    a = (arg or "").strip().lower()
+    if a in ("on", "1", "true", "yes"):
+        _CHAT_STATE["opsec"] = True
+    elif a in ("off", "0", "false", "no"):
+        _CHAT_STATE["opsec"] = False
+    else:
+        _CHAT_STATE["opsec"] = not _CHAT_STATE["opsec"]
+    state = "ON" if _CHAT_STATE["opsec"] else "OFF"
+    style = tokens.WARN if _CHAT_STATE["opsec"] else tokens.DIM
+    console.print(f"   [{style}]⚑ OPSEC mode → {state}[/]  [{tokens.DIM}]· applies to next scan[/]")
+    if _CHAT_STATE["opsec"]:
+        console.print(f"   [{tokens.DIM}]SOCKS5 127.0.0.1:9050 · jitter · UA rotation · active modules refuse unless overridden[/]")
+
+
+def _slash_explain_toggle() -> None:
+    """`/explain` — toggle AI explain on the next scan."""
+    _CHAT_STATE["explain"] = not _CHAT_STATE["explain"]
+    state = "ON" if _CHAT_STATE["explain"] else "OFF"
+    console.print(f"   [{tokens.ACCENT}]🤖 AI explain → {state}[/]")
+    if _CHAT_STATE["explain"]:
+        import os
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            console.print(f"   [{tokens.WARN}]ANTHROPIC_API_KEY not set — explain will skip[/]")
+
+
+async def _slash_export(db: "Database", arg: str) -> None:
+    """`/export <html|md|json|jsonl> [PATH]` — re-render the last scan."""
+    a = (arg or "html").strip().split()
+    fmt = (a[0] if a else "html").lower()
+    out = a[1] if len(a) > 1 else None
+    q = _CHAT_STATE.get("last_query")
+    hits = _CHAT_STATE.get("last_hits")
+    if q is None or hits is None:
+        console.print(f"   [{tokens.WARN}]no scan to export yet — run one first[/]")
+        return
+    from datetime import datetime
+    import json as _json
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    if fmt == "html":
+        from app.ui.html_report import render as render_html
+        path = out or f"./osint-{q.kind.value}-{ts}.html"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(render_html(q, hits, _CHAT_STATE.get("last_elapsed_ms", 0)))
+        console.print(f"   [{tokens.OK}]✓ html →[/] [{tokens.ACCENT}]{path}[/]")
+    elif fmt == "md":
+        from app.ui.md_report import render as render_md
+        path = out or f"./osint-{q.kind.value}-{ts}.md"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(render_md(q, hits, _CHAT_STATE.get("last_elapsed_ms", 0)))
+        console.print(f"   [{tokens.OK}]✓ md →[/] [{tokens.ACCENT}]{path}[/]")
+    elif fmt in ("json", "jsonl"):
+        path = out or f"./osint-{q.kind.value}-{ts}.{fmt}"
+        with open(path, "w", encoding="utf-8") as f:
+            if fmt == "json":
+                _json.dump([h.to_dict() if hasattr(h, "to_dict") else h.__dict__ for h in hits], f, default=str, indent=2)
+            else:
+                for h in hits:
+                    f.write(_json.dumps(h.to_dict() if hasattr(h, "to_dict") else h.__dict__, default=str) + "\n")
+        console.print(f"   [{tokens.OK}]✓ {fmt} →[/] [{tokens.ACCENT}]{path}[/]")
+    else:
+        console.print(f"   [{tokens.BAD}]unknown format {fmt!r}[/] — use html | md | json | jsonl")
+
+
 async def _action_theme_picker() -> None:
     """v4.2 theme switcher — pick from 7 palettes, persist to ~/.config."""
     from app.ui.tokens import THEMES, ACTIVE, persist_theme
@@ -1824,13 +1993,15 @@ async def action_settings_overview() -> None:
 
 # ---- main loop --------------------------------------------------------------
 
-async def run_interactive(show_figlet: bool = False) -> int:
+async def run_interactive(show_figlet: bool = False, classic: bool = False) -> int:
     """Top-level interactive shell. Returns process exit code.
 
-    Cold-start: compact one-line brandmark by default (gh / starship style).
-    The full BLUETM.UZ figlet is gated behind --banner — top-tier 2026 CLIs
-    (gh, charm, lazygit, btop, starship) all skip the figlet by default; we
-    follow suit.
+    Default (v4.3): chat-style — `osint` opens straight into a persistent
+    prompt. Type a target → scan runs inline → prompt returns. Slash
+    commands replace menu navigation entirely.
+
+    Pass ``classic=True`` (CLI: ``--classic``) to use the menu-based shell
+    from v4.2.x — the one with `pick_action()` on launch.
     """
     from app import __version__ as _ver
     if show_figlet:
@@ -1872,47 +2043,67 @@ async def run_interactive(show_figlet: bool = False) -> int:
     db = Database(s.db_path)
     await db.connect()
     try:
-        while True:
-            # v4.2: single-fire main menu (prompt_toolkit Application). The key
-            # fires INSTANTLY — no Enter required, matching lazygit / k9s / btop.
+        if classic:
+            # ---- Legacy menu-based shell (v4.2.x behaviour) ---------------
             from app.ui.main_menu import pick_action
-            choice = await pick_action()
-            if choice in (None, "exit"):
+            while True:
+                choice = await pick_action()
+                if choice in (None, "exit"):
+                    console.print(f"\n[{tokens.DIM}]bye — {BRAND}[/]\n")
+                    return 0
+                if choice == "lookup":
+                    if not await action_lookup(db):
+                        return 0
+                elif choice == "history":
+                    await action_history(db)
+                elif choice == "modules":
+                    await action_modules()
+                elif choice == "stats":
+                    await action_stats()
+                elif choice == "settings":
+                    import asyncio as _asyncio
+                    from app.ui.config_cli import cmd_wizard
+                    try:
+                        await _asyncio.to_thread(cmd_wizard)
+                    except Exception as e:
+                        console.print(f"[{tokens.BAD}]settings wizard error:[/] {e}")
+                elif choice == "palette":
+                    from app.ui.command_palette import build_palette, open_palette
+                    async def _db_factory():
+                        return db
+                    try:
+                        await open_palette(build_palette(_db_factory))
+                    except Exception as e:
+                        console.print(f"[{tokens.BAD}]palette error:[/] {e}")
+                elif choice == "help":
+                    await show_help("main")
+                    await _press_enter()
+                elif choice == "theme":
+                    await _action_theme_picker()
+            return 0
+
+        # ---- Default v4.3: chat-style persistent prompt -------------------
+        # Print a Claude-Code-style help hint once at start.
+        hint = Text("   ")
+        hint.append("type a target ", style=tokens.DIM)
+        hint.append("·", style=tokens.DIM)
+        hint.append(" /help", style=tokens.ACCENT)
+        hint.append(" for commands ", style=tokens.DIM)
+        hint.append("·", style=tokens.DIM)
+        hint.append(" /quit", style=tokens.ACCENT)
+        hint.append(" to exit ", style=tokens.DIM)
+        hint.append("·", style=tokens.DIM)
+        hint.append(" --classic", style=tokens.DIM)
+        hint.append(" for the legacy menu", style=tokens.DIM)
+        console.print(hint)
+
+        # The prompt loop lives entirely inside action_lookup; it recurses
+        # to itself after every command + every scan. /quit returns False.
+        while True:
+            should_continue = await action_lookup(db)
+            if not should_continue:
                 console.print(f"\n[{tokens.DIM}]bye — {BRAND}[/]\n")
                 return 0
-            if choice == "lookup":
-                if not await action_lookup(db):
-                    return 0
-            elif choice == "history":
-                await action_history(db)
-            elif choice == "modules":
-                await action_modules()
-            elif choice == "stats":
-                await action_stats()
-            elif choice == "settings":
-                # cmd_wizard() is sync + internally calls asyncio.run() for
-                # the Telegram-status check. Off-load to a thread so its
-                # asyncio.run gets its own loop.
-                import asyncio as _asyncio
-                from app.ui.config_cli import cmd_wizard
-                try:
-                    await _asyncio.to_thread(cmd_wizard)
-                except Exception as e:
-                    console.print(f"[{tokens.BAD}]settings wizard error:[/] {e}")
-            elif choice == "palette":
-                from app.ui.command_palette import build_palette, open_palette
-
-                async def _db_factory():
-                    return db
-                try:
-                    await open_palette(build_palette(_db_factory))
-                except Exception as e:
-                    console.print(f"[{tokens.BAD}]palette error:[/] {e}")
-            elif choice == "help":
-                await show_help("main")
-                await _press_enter()
-            elif choice == "theme":
-                await _action_theme_picker()
     except (KeyboardInterrupt, EOFError):
         console.print(f"\n[{tokens.DIM}]bye — {BRAND}[/]\n")
         return 130

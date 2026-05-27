@@ -77,11 +77,11 @@ def test_osint_list_modules_no_crash():
     assert "internetdb" in r.stdout
 
 
-def test_osint_interactive_launches_main_menu():
-    """REAL pexpect spawn — would catch the questionary '?' crash.
+def test_osint_default_launches_chat_shell():
+    """v4.3: default `osint` opens the chat-style prompt (❯), not a menu.
 
-    Spawns `osint --no-banner --no-color`, waits for "main menu" header to
-    appear, then sends q to exit. Asserts no Python traceback in output.
+    Catches launch crashes (questionary errors, import errors, etc.) by
+    asserting no Python traceback in output.
     """
     pexpect = pytest.importorskip("pexpect")
     bin_ = _osint_bin()
@@ -89,13 +89,33 @@ def test_osint_interactive_launches_main_menu():
                           encoding="utf-8", timeout=15,
                           dimensions=(40, 120))
     try:
+        idx = child.expect(["❯", "Traceback", pexpect.EOF, pexpect.TIMEOUT],
+                            timeout=10)
+        if idx == 1:
+            pytest.fail(f"crash on launch: {child.before}\n{child.after}")
+        assert idx == 0, f"chat prompt didn't render: idx={idx}, before={child.before[:200]!r}"
+        child.send("/quit\r")  # graceful slash-quit
+    finally:
+        try:
+            child.kill(9)
+            child.close(force=True)
+        except Exception:
+            pass
+
+
+def test_osint_classic_flag_launches_menu():
+    """v4.3 regression: `--classic` opens the legacy menu shell."""
+    pexpect = pytest.importorskip("pexpect")
+    bin_ = _osint_bin()
+    child = pexpect.spawn(bin_, ["--no-color", "--no-banner", "--classic"],
+                          encoding="utf-8", timeout=15,
+                          dimensions=(40, 120))
+    try:
         idx = child.expect(["main menu", "Traceback", pexpect.EOF, pexpect.TIMEOUT],
                             timeout=10)
         if idx == 1:
-            # Traceback before main menu = crash
-            pytest.fail(f"crash on launch: {child.before}\n{child.after}")
-        assert idx == 0, f"main menu didn't render: idx={idx}, before={child.before[:200]!r}"
-        # send q to quit — even if it just navigates, the launch worked
+            pytest.fail(f"crash on --classic: {child.before}\n{child.after}")
+        assert idx == 0, f"--classic didn't render main menu: idx={idx}"
         child.send("q")
     finally:
         try:

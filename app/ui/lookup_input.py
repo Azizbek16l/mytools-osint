@@ -41,6 +41,8 @@ from app.core.types import QueryKind
 SlashName = Literal[
     "help", "clear", "history", "modules", "sites",
     "settings", "version", "kind", "quit",
+    # v4.3 chat-shell additions
+    "theme", "profile", "graph", "opsec", "explain", "export",
 ]
 
 # Canonical name → aliases (the canonical is always first). Used by the
@@ -55,6 +57,13 @@ SLASH_ALIASES: dict[SlashName, tuple[str, ...]] = {
     "version":  ("/version", "/v"),
     "kind":     ("/kind",),
     "quit":     ("/quit", "/q", "/exit"),
+    # v4.3 — chat-shell first-class actions
+    "theme":    ("/theme", "/themes"),
+    "profile":  ("/profile",),
+    "graph":    ("/graph", "/g"),
+    "opsec":    ("/opsec",),
+    "explain":  ("/explain",),
+    "export":   ("/export",),
 }
 
 # Flat list of every recognised slash spelling (sorted for stable completion).
@@ -74,6 +83,13 @@ SLASH_DESCRIPTIONS: dict[SlashName, str] = {
     "version":  "print mytools-osint version + brand",
     "kind":     "force a query kind: /kind <username|email|…>",
     "quit":     "exit interactive mode",
+    # v4.3
+    "theme":    "pick a palette (dracula, nord, tokyo-night, …)",
+    "profile":  "set or list profiles: /profile [name|list]",
+    "graph":    "entity graph: /graph [show|stats|export] [args]",
+    "opsec":    "toggle OPSEC mode for this session",
+    "explain":  "toggle AI explain for the next scan",
+    "export":   "export the last scan: /export <html|md|json|jsonl>",
 }
 
 KIND_VALUES: tuple[str, ...] = tuple(k.value for k in QueryKind)

@@ -2,6 +2,56 @@
 
 All notable changes to this project. Format: Keep-a-Changelog · Semver.
 
+## [4.3.0] - 2026-05-27  —  Chat shell: Claude-Code-style persistent prompt
+
+The biggest UX shift since v4.0. The interactive shell no longer opens
+with a menu — it opens straight into a **persistent input prompt**.
+Type a target → scan runs inline → prompt comes back. No menus, no
+intermediate screens, no clicks. Slash commands replace navigation.
+
+### Changed
+- **Default shell flow** — `osint` (no args) now opens directly into
+  a Claude-Code-style prompt. Typing a target auto-detects kind and
+  runs the scan; output streams inline. After a scan completes, the
+  prompt returns immediately — no `after_results_menu` interstitial.
+- **Bottom toolbar** now shows the session state pill — current
+  profile, OPSEC flag, explain flag — alongside the live kind hint.
+- **Tab completion is live** (`complete_while_typing=True`). Slash
+  commands, kind values, and history entries pop up as you type.
+  AutoSuggestFromHistory ghost text + popup coexist without conflict.
+
+### New slash commands (chat-shell first-class actions)
+| command | does what |
+|---|---|
+| `/theme` | open the theme picker (also: `T` in classic menu) |
+| `/profile <name>` | set the per-session default profile (or `list`/`off`) |
+| `/graph [show\|stats\|export] [args]` | inline entity-graph ops |
+| `/opsec [on\|off]` | toggle OPSEC mode for the next scan |
+| `/explain` | toggle AI explain on the next scan |
+| `/export <html\|md\|json\|jsonl> [PATH]` | re-render the last scan |
+
+Plus all the v4.2 slash commands continue to work: `/help`, `/clear`,
+`/history`, `/modules`, `/sites`, `/settings` (aka `/config`),
+`/version`, `/kind`, `/quit` (aka `/q`, `/exit`).
+
+### Added
+- **`--classic` flag** — falls back to the v4.2 menu-based shell for
+  users who prefer keyboard-nav menus. Both shells share all sub-actions
+  (modules, history, settings, palette, theme picker).
+- **Session state** persists across prompts (profile / opsec / explain)
+  until you `/quit` or change it.
+
+### Why
+Per user feedback after the v4.2 UX work: "the design is good, but the
+CLI isn't as ergonomic as Claude Code". The menu-first model was a
+2018 affordance; modern dev-tool CLIs (Claude Code, Aider, Warp AI,
+gemini-cli, gh copilot) are all chat-first. v4.3 brings mytools-osint
+in line.
+
+### Tests
+244 → **246 passing** (added `test_osint_default_launches_chat_shell`
+and `test_osint_classic_flag_launches_menu`).
+
 ## [4.2.1] - 2026-05-26  —  Security + UX hotfix sweep
 
 Multi-track patch covering security, UX, and QA findings against v4.2.0.

@@ -631,6 +631,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--no-banner", action="store_true", help="suppress the startup banner")
     ap.add_argument("--no-splash", action="store_true",
                     help="suppress the cold-start splash (v4.2). Also implied by --no-banner.")
+    ap.add_argument("--classic", action="store_true",
+                    help="use the v4.2 menu-based interactive shell instead of the v4.3 chat-style prompt.")
     ap.add_argument("--list-modules", action="store_true",
                     help="list all registered OSINT modules and exit")
     ap.add_argument("--list-stats", action="store_true",
@@ -1161,7 +1163,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.interactive or (not args.value and sys.stdin.isatty()):
         from app.ui.interactive import run_interactive
         load_settings()
-        return asyncio.run(run_interactive(show_figlet=bool(args.banner)))
+        return asyncio.run(run_interactive(
+            show_figlet=bool(args.banner),
+            classic=bool(getattr(args, "classic", False)),
+        ))
 
     if not args.value:
         print(render_banner(st))
