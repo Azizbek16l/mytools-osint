@@ -121,3 +121,16 @@ def test_no_splash_flag_in_argparse():
     # Must not raise SystemExit on --no-splash.
     ns = p.parse_args(["--no-splash", "--version"])
     assert ns.no_splash is True
+
+
+def test_theme_picker_default_uses_value_not_label():
+    """v4.2.2 regression: questionary expects value (not label) for default=.
+    Passing the label raises ValueError 'Invalid default value passed'.
+    """
+    import inspect
+    from app.ui import interactive
+    src = inspect.getsource(interactive._action_theme_picker)
+    # The fixed form must pass current_name (which is in choice.value), not
+    # default_label (the rendered string).
+    assert "default=current_name" in src, "theme picker must pass value, not label"
+    assert "default=default_label" not in src, "still passing label — crashes questionary"

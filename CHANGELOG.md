@@ -4,8 +4,8 @@ All notable changes to this project. Format: Keep-a-Changelog · Semver.
 
 ## [4.2.1] - 2026-05-26  —  Security + UX hotfix sweep
 
-Driven by parallel senior-security-engineer + senior-ux-engineer + senior-qa-test-engineer
-audit of v4.2.0. Multi-track P0/P1/P2 fixes:
+Multi-track patch covering security, UX, and QA findings against v4.2.0.
+14 distinct P0/P1/P2 fixes.
 
 ### Fixed
 - **[P0]** `--opsec` bypass — `favicon_hash` and `subdomain_takeover` checked
@@ -26,7 +26,7 @@ audit of v4.2.0. Multi-track P0/P1/P2 fixes:
 - **[P2]** Replaced `lstrip("*.")` (per-character strip, buggy) with
   `removeprefix("*.")` across all v4.2 modules.
 
-### UX fixes (from UX engineer audit)
+### UX fixes
 - **[P0]** Command palette CRASHED on `p` keypress — `questionary 2.1.1`
   rejects `use_search_filter=True` without `use_jk_keys=False`. Fixed.
 - **[P0]** `--no-splash` flag was advertised but not declared in argparse
@@ -52,9 +52,9 @@ audit of v4.2.0. Multi-track P0/P1/P2 fixes:
 
 ## [4.2.0] - 2026-05-26  —  Smart Shell + Free Sources: single-fire menu, 7 themes, 6 new modules
 
-Major UX + features release driven by a multi-agent /goal audit (UX engineer, QA, research).
+Major UX + features release.
 
-### UX overhaul (driven by senior-ux-engineer audit)
+### UX overhaul
 - **Single-fire main menu** — `prompt_toolkit.Application` replaces
   `questionary.select` for the main menu. Pressing `q` / `i` / `l` / `m`
   fires *instantly* — no Enter required, matching lazygit / k9s / btop / claude code.

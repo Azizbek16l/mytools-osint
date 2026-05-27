@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en" class="bg-[#0D1117]">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>docs · mytools-osint</title>
+<meta name="description" content="Documentation for mytools-osint — install, CLI reference, modules, profiles, OPSEC, entity graph, AI, SIEM exporters." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      fontFamily: { mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'] },
+      colors: {
+        bg:'#0D1117', panel:'#161B22', line:'#21262D',
+        fg:'#C9D1D9', dim:'#6E7681', accent:'#58A6FF',
+        ok:'#3FB950', warn:'#D29922', bad:'#F85149',
+      },
+    }
+  }
+}
+</script>
+<style>
+  html, body { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  body {
+    background:
+      radial-gradient(60rem 40rem at 90% -10%, rgba(88,166,255,0.06), transparent 70%),
+      #0D1117;
+    color: #C9D1D9;
+    background-attachment: fixed;
+  }
+  html { scroll-behavior: smooth; scroll-padding-top: 5rem; }
+  ::selection { background: #58A6FF; color: #0D1117; }
+
+  a.flip { transition: background 0.1s, color 0.1s; }
+  a.flip:hover { background: #C9D1D9; color: #0D1117; }
+  a.und:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+  .cursor::after { content:"█"; color:#58A6FF; animation: blink 1.1s steps(1,end) infinite; margin-left:.05em; }
+  @keyframes blink { 50% { opacity: 0 } }
+
+  /* Article typography */
+  .prose h2 { scroll-margin-top: 6rem; }
+  .prose pre { background: #161B22; border: 1px solid #21262D; padding: 1rem 1.25rem; overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+  .prose code { background: rgba(88,166,255,0.08); border: 1px solid #21262D; padding: 1px 5px; font-size: 0.92em; color: #C9D1D9; }
+  .prose pre code { background: transparent; border: 0; padding: 0; font-size: inherit; color: inherit; }
+  .prose p { line-height: 1.75; color: #C9D1D9; }
+  .prose ul { margin-left: 0; list-style: none; }
+  .prose ul li { position: relative; padding-left: 1.25rem; margin: 0.4rem 0; line-height: 1.65; }
+  .prose ul li::before { content:"▸"; color:#58A6FF; position:absolute; left: 0; }
+  .prose table { width: 100%; border-collapse: collapse; }
+  .prose th, .prose td { padding: 0.6rem 0.9rem; border: 1px solid #21262D; text-align: left; font-size: 13px; vertical-align: top; }
+  .prose th { background: #161B22; color: #C9D1D9; font-weight: 600; }
+
+  /* Code syntax tints */
+  .term .p { color:#58A6FF; }
+  .term .c { color:#6E7681; }
+  .term .g { color:#3FB950; }
+  .term .r { color:#F85149; }
+  .term .w { color:#D29922; }
+  .term .acc { color:#C9D1D9; font-weight:500; }
+
+  /* Sidebar active link */
+  .toc a.active { color: #58A6FF; border-color: #58A6FF; background: rgba(88,166,255,0.06); }
+
+  /* Callout boxes */
+  .callout { border-left: 3px solid; padding: 0.9rem 1.1rem; background: rgba(255,255,255,0.02); margin: 1.5rem 0; }
+  .callout-info { border-color: #58A6FF; }
+  .callout-warn { border-color: #D29922; }
+  .callout-bad  { border-color: #F85149; }
+  .callout-ok   { border-color: #3FB950; }
+  .callout > strong { color: #C9D1D9; }
+</style>
+</head>
+
+<body class="text-fg antialiased">
+
+<!-- ═════ NAV ═════ -->
+<nav class="sticky top-0 z-30 bg-bg/85 backdrop-blur-md border-b border-line">
+  <div class="max-w-7xl mx-auto px-5 sm:px-8 py-3.5 flex items-center gap-4">
+    <a href="./index.html" class="flex items-center gap-2.5 text-fg font-bold tracking-tight">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#58A6FF" stroke-width="1.5">
+        <path d="M3 4h6v6H3zM15 4h6v6h-6zM3 14h6v6H3zM15 14h6v6h-6z"/>
+        <path d="M12 7v10M7 12h10" stroke="#58A6FF" stroke-width="1"/>
+      </svg>
+      <span>mytools-osint</span>
+      <span class="hidden sm:inline ml-1 px-1.5 py-0.5 text-[10px] font-medium text-accent border border-line bg-panel">v4.2.2</span>
+      <span class="hidden sm:inline ml-2 text-dim text-xs">/ docs</span>
+    </a>
+    <div class="ml-auto hidden md:flex items-center gap-1 text-sm text-dim">
+      <a href="./index.html" class="flip px-3 py-1.5">home</a>
+      <span class="text-line">│</span>
+      <a href="./index.html#install" class="flip px-3 py-1.5">install</a>
+      <span class="text-line">│</span>
+      <a href="https://github.com/Azizbek16l/mytools-osint" target="_blank" rel="noopener" class="flip px-3 py-1.5">github</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ═════ MAIN: SIDEBAR + ARTICLE ═════ -->
+<div class="max-w-7xl mx-auto px-5 sm:px-8 py-12 grid gap-12 lg:grid-cols-[16rem_minmax(0,1fr)]">
+
+  <!-- TOC sidebar -->
+  <aside class="toc lg:sticky lg:top-20 lg:self-start text-sm">
+    <div class="text-xs text-accent uppercase tracking-widest mb-4">contents</div>
+    <ul class="space-y-px">
+      <li><a href="#install"      class="block flip border-l border-line pl-3 py-1.5 text-dim">01 · install</a></li>
+      <li><a href="#quickstart"   class="block flip border-l border-line pl-3 py-1.5 text-dim">02 · quickstart</a></li>
+      <li><a href="#cli"          class="block flip border-l border-line pl-3 py-1.5 text-dim">03 · cli reference</a></li>
+      <li><a href="#modules"      class="block flip border-l border-line pl-3 py-1.5 text-dim">04 · modules</a></li>
+      <li><a href="#profiles"     class="block flip border-l border-line pl-3 py-1.5 text-dim">05 · profiles</a></li>
+      <li><a href="#opsec"        class="block flip border-l border-line pl-3 py-1.5 text-dim">06 · opsec mode</a></li>
+      <li><a href="#graph"        class="block flip border-l border-line pl-3 py-1.5 text-dim">07 · entity graph</a></li>
+      <li><a href="#ai"           class="block flip border-l border-line pl-3 py-1.5 text-dim">08 · ai explain</a></li>
+      <li><a href="#siem"         class="block flip border-l border-line pl-3 py-1.5 text-dim">09 · siem export</a></li>
+      <li><a href="#dashboard"    class="block flip border-l border-line pl-3 py-1.5 text-dim">10 · web dashboard</a></li>
+      <li><a href="#themes"       class="block flip border-l border-line pl-3 py-1.5 text-dim">11 · themes</a></li>
+      <li><a href="#config"       class="block flip border-l border-line pl-3 py-1.5 text-dim">12 · config + keys</a></li>
+      <li><a href="#troubleshoot" class="block flip border-l border-line pl-3 py-1.5 text-dim">13 · troubleshooting</a></li>
+      <li><a href="#faq"          class="block flip border-l border-line pl-3 py-1.5 text-dim">14 · faq</a></li>
+    </ul>
+    <div class="mt-8 text-xs text-dim leading-relaxed border-t border-line pt-5">
+      Found a doc bug? <a href="https://github.com/Azizbek16l/mytools-osint/issues/new" target="_blank" rel="noopener" class="text-accent und">open an issue →</a>
+    </div>
+  </aside>
+
+  <!-- Article -->
+  <article class="prose max-w-3xl">
+
+    <header class="mb-12">
+      <div class="text-xs text-accent uppercase tracking-widest">documentation</div>
+      <h1 class="text-3xl sm:text-4xl font-bold mt-3 leading-tight">mytools-osint <span class="text-dim">/</span> reference</h1>
+      <p class="mt-4 text-sm text-dim">Updated for <span class="text-fg">v4.2.2</span>. Authorised security testing only.</p>
+    </header>
+
+    <!-- ═════ 01 INSTALL ═════ -->
+    <section id="install" class="mb-16">
+      <h2 class="text-2xl font-bold">01 · install</h2>
+      <p class="mt-4">Pick a platform. The one-line installers verify SHA-256 against the release manifest before extracting.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">macOS + Linux (one-liner)</h3>
+      <pre><span class="text-dim">$</span> curl -fsSL https://raw.githubusercontent.com/Azizbek16l/mytools-osint/main/scripts/install.sh | bash</pre>
+      <p class="text-sm text-dim">Pin a version with <code>OSINT_VERSION=v4.2.2</code>; pick a different install dir with <code>OSINT_INSTALL_DIR=~/bin</code>.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Windows (PowerShell, one-liner)</h3>
+      <pre><span class="text-dim">PS&gt;</span> irm https://raw.githubusercontent.com/Azizbek16l/mytools-osint/main/scripts/install.ps1 | iex</pre>
+      <p class="text-sm text-dim">Installs to <code>%LOCALAPPDATA%\Programs\mytools-osint\osint.exe</code>, appends per-user PATH, no admin.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">brew (macOS + Linux)</h3>
+      <pre><span class="text-dim">$</span> brew tap Azizbek16l/osint
+<span class="text-dim">$</span> brew install mytools-osint
+<span class="text-dim">$</span> brew upgrade mytools-osint   <span class="text-dim"># later</span></pre>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">scoop (Windows)</h3>
+      <pre><span class="text-dim">PS&gt;</span> scoop bucket add osint https://github.com/Azizbek16l/scoop-bucket
+<span class="text-dim">PS&gt;</span> scoop install mytools-osint
+<span class="text-dim">PS&gt;</span> scoop update mytools-osint   <span class="text-dim"># later</span></pre>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">winget (Windows, official)</h3>
+      <pre><span class="text-dim">PS&gt;</span> winget install Azizbek16l.mytools-osint</pre>
+      <p class="text-sm text-dim">Each release requires Microsoft moderator approval (~1–3 days). For instant access, use scoop or the direct download.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Direct download</h3>
+      <p>Pick a binary from <a href="https://github.com/Azizbek16l/mytools-osint/releases/latest" target="_blank" rel="noopener" class="text-accent und">the latest release</a>, verify SHA-256 against <code>SHA256SUMS-vX.Y.Z</code>, drop on your <code>$PATH</code>, <code>chmod +x</code>.</p>
+
+      <div class="callout callout-info">
+        <strong>Cold-start:</strong> The Nuitka onefile self-extracts on first launch (8–12 s). Subsequent runs are instant. To avoid the extract, install via <code>pipx</code> once published, or run from a long-lived shell.
+      </div>
+    </section>
+
+    <!-- ═════ 02 QUICKSTART ═════ -->
+    <section id="quickstart" class="mb-16">
+      <h2 class="text-2xl font-bold">02 · quickstart</h2>
+      <p class="mt-4">Run <code>osint</code> with no arguments — the interactive shell opens. Single-fire keys: press <code>l</code> for a new lookup, <code>i</code> for help, <code>q</code> to exit. No Enter required.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">First scan</h3>
+      <pre><span class="text-dim">$</span> osint github.com</pre>
+      <p>Kind is auto-detected (domain). 32 modules run in parallel. Live stream shows hits as they arrive. Final report includes module breakdown + entity graph delta.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">By kind</h3>
+      <pre><span class="text-dim">$</span> osint <span class="text-fg">temur</span>                              <span class="text-dim"># username</span>
+<span class="text-dim">$</span> osint <span class="text-fg">satya@microsoft.com</span>                <span class="text-dim"># email</span>
+<span class="text-dim">$</span> osint <span class="text-fg">+998 90 123 45 67</span>                 <span class="text-dim"># phone</span>
+<span class="text-dim">$</span> osint <span class="text-fg">@durov</span>                             <span class="text-dim"># telegram</span>
+<span class="text-dim">$</span> osint <span class="text-fg">8.8.8.8</span>                            <span class="text-dim"># ip</span>
+<span class="text-dim">$</span> osint <span class="text-fg">5d41402abc4b2a76b9719d911017c592</span>   <span class="text-dim"># hash (md5)</span></pre>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Profile bundle</h3>
+      <pre><span class="text-dim">$</span> osint github.com <span class="text-accent">--profile domain-recon</span>     <span class="text-dim"># 18 modules</span>
+<span class="text-dim">$</span> osint github.com <span class="text-accent">--profile red-team --pivot 1</span> <span class="text-dim"># 34 modules + auto-pivot</span></pre>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Reports</h3>
+      <pre><span class="text-dim">$</span> osint github.com --html  report.html
+<span class="text-dim">$</span> osint github.com --md    report.md
+<span class="text-dim">$</span> osint github.com --format jsonl --out report.jsonl</pre>
+    </section>
+
+    <!-- ═════ 03 CLI ═════ -->
+    <section id="cli" class="mb-16">
+      <h2 class="text-2xl font-bold">03 · cli reference</h2>
+      <p class="mt-4">Top-level form: <code>osint [value] [flags] [subcommand]</code>. A "value" can be any kind (auto-inferred) or an explicit kind via <code>--kind</code>.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Output</h3>
+      <table>
+        <thead><tr><th>flag</th><th>effect</th></tr></thead>
+        <tbody>
+          <tr><td><code>--format plain|json|jsonl|csv</code></td><td>Output format (default <code>plain</code>; <code>jsonl</code> auto-selected in <code>--bulk</code>)</td></tr>
+          <tr><td><code>--out FILE</code></td><td>Write to file instead of stdout</td></tr>
+          <tr><td><code>--html FILE</code></td><td>Render an HTML report with interactive Verlet graph (~45 KB)</td></tr>
+          <tr><td><code>--md FILE</code></td><td>Render a GitHub-flavoured Markdown report with ATT&amp;CK technique links</td></tr>
+          <tr><td><code>--no-color</code> / <code>--no-banner</code></td><td>Suppress ANSI and the figlet banner</td></tr>
+          <tr><td><code>--no-splash</code></td><td>Suppress the cold-start splash (also implied by <code>--no-banner</code>)</td></tr>
+        </tbody>
+      </table>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Module selection</h3>
+      <table>
+        <thead><tr><th>flag</th><th>effect</th></tr></thead>
+        <tbody>
+          <tr><td><code>--profile NAME</code></td><td>Apply a curated bundle (see §05)</td></tr>
+          <tr><td><code>--enable MOD</code> / <code>--disable MOD</code></td><td>Toggle a single module on top of the profile</td></tr>
+          <tr><td><code>--min-severity {info,low,medium,high,critical}</code></td><td>Drop hits below this severity</td></tr>
+          <tr><td><code>--per-source</code></td><td>Render the per-source breakdown table at the end of a scan</td></tr>
+        </tbody>
+      </table>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Scaling</h3>
+      <table>
+        <thead><tr><th>flag</th><th>effect</th></tr></thead>
+        <tbody>
+          <tr><td><code>--bulk FILE</code></td><td>Read one target per line; concurrent execution</td></tr>
+          <tr><td><code>--parallel N</code></td><td>Bulk concurrency (default 4)</td></tr>
+          <tr><td><code>--pivot DEPTH</code></td><td>Auto-pivot to depth N via entity graph BFS</td></tr>
+          <tr><td><code>--no-save</code></td><td>Do not persist hits to the SQLite store</td></tr>
+        </tbody>
+      </table>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Safety / OPSEC</h3>
+      <table>
+        <thead><tr><th>flag</th><th>effect</th></tr></thead>
+        <tbody>
+          <tr><td><code>--opsec</code></td><td>SOCKS5 (<code>127.0.0.1:9050</code>), jitter, UA rotation; active modules refuse unless per-module override is set (see §06)</td></tr>
+          <tr><td><code>--debug</code></td><td>Surface per-source error details and HTTP timings</td></tr>
+        </tbody>
+      </table>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Subcommands</h3>
+      <table>
+        <thead><tr><th>command</th><th>purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>osint graph &lt;show|export|rebuild|stats|forget&gt;</code></td><td>Entity-graph operations</td></tr>
+          <tr><td><code>osint export &lt;kind&gt; &lt;value&gt; --to &lt;target&gt;</code></td><td>SIEM/MISP exporter (Splunk/Elastic/syslog/MISP)</td></tr>
+          <tr><td><code>osint serve [--port N]</code></td><td>Local web dashboard (stdlib HTTP + SSE)</td></tr>
+          <tr><td><code>osint watch &lt;add|list|remove|run&gt;</code></td><td>Watchlist daemon · re-scan on schedule, Telegram alert on diff</td></tr>
+          <tr><td><code>osint diff &lt;kind&gt; &lt;value&gt; [--from ID --to ID]</code></td><td>Diff two stored scans of the same target</td></tr>
+          <tr><td><code>osint config &lt;wizard|show|edit|set|unset&gt;</code></td><td>Settings (API keys, Telegram, paths)</td></tr>
+          <tr><td><code>osint cache &lt;stats|clear|clear-expired&gt;</code></td><td>HTTP cache control</td></tr>
+          <tr><td><code>osint completion &lt;bash|zsh|fish&gt;</code></td><td>Emit shell completion script</td></tr>
+          <tr><td><code>osint cert-watch &lt;pattern&gt; [--max N]</code></td><td>Live tail Certificate Transparency</td></tr>
+          <tr><td><code>osint opsec-check [--opsec]</code></td><td>Verify Tor exit + UA + jitter discipline</td></tr>
+          <tr><td><code>osint self-update [--check]</code></td><td>Pull latest release binary (SHA-256 verified)</td></tr>
+          <tr><td><code>osint mcp</code></td><td>Start MCP server over stdio (Claude / Cursor)</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ═════ 04 MODULES ═════ -->
+    <section id="modules" class="mb-16">
+      <h2 class="text-2xl font-bold">04 · modules</h2>
+      <p class="mt-4">45 modules across passive + active recon. Run <code>osint --list-modules</code> for the live registry with health + 7-day sparkline.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">identity (6)</h3>
+      <ul>
+        <li><code>username</code>      — Sherlock + WhatsMyName across 1,008 sites</li>
+        <li><code>email</code>          — HIBP, Gravatar, Adobe, breach catalog</li>
+        <li><code>email_extras</code>   — emailrep.io reputation + role mailbox detection</li>
+        <li><code>phone</code>          — libphonenumber + Telegram MTProto (with API key)</li>
+        <li><code>telegram</code>       — t.me deep-link probe + bot resolver</li>
+        <li><code>whatsapp</code>       — wa.me deep-link existence check</li>
+      </ul>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">network (10)</h3>
+      <ul>
+        <li><code>ip</code>             — reverse DNS, rDNS, AbuseIPDB (with key), ipinfo</li>
+        <li><code>ip_extras</code>      — GreyNoise community, Spamhaus DROP, Team Cymru bogons</li>
+        <li><code>domain</code>         — WHOIS, A/AAAA/MX/NS/TXT/SOA, parked detection</li>
+        <li><code>discovery</code>      — Google dorks + Wayback CDX</li>
+        <li><code>patterns</code>       — Username variation generator (1024 candidates)</li>
+        <li><code>adjacency</code>      — Cross-platform identity pivots (Keybase, GitHub, blog)</li>
+        <li><code>ssl_tls</code>        — Cert chain, SAN list, days-to-expiry, key strength</li>
+        <li><code>http_headers</code>   — Security headers + caching + CSP analysis</li>
+        <li><code>asn_bgp</code>        — Cymru + BGPView ASN holder + prefix</li>
+        <li><code>tech_fingerprint</code>— ~30 CDN / framework / CMS signatures via headers + HTML</li>
+      </ul>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">threat intel (4)</h3>
+      <ul>
+        <li><code>internetdb</code>     — Shodan InternetDB (free, no key): ports, CVEs, tags</li>
+        <li><code>threat_intel</code>   — PhishTank, ThreatFox, URLhaus (latter two need free abuse.ch key)</li>
+        <li><code>takeover</code>       — Generic CNAME-dangling + service-suffix sniff (legacy)</li>
+        <li><code>web_recon</code>      — robots.txt, sitemap.xml, security.txt, common paths</li>
+      </ul>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">defense surface (8)</h3>
+      <ul>
+        <li><code>email_security</code> — SPF / DMARC / DKIM / DMARC report URI parsing</li>
+        <li><code>typosquat</code>      — 100+ permutations + DNS-resolve sweep</li>
+        <li><code>pgp_keys</code>       — keys.openpgp.org + keyserver.ubuntu.com</li>
+        <li><code>tor_check</code>      — Onionoo exit list (degrades if Tor unreachable)</li>
+        <li><code>github_leaks</code>   — GitHub user-search + (with token) code-search</li>
+        <li><code>cloud_buckets</code>  — S3 / GCS / Azure Blob common-name probe</li>
+        <li><code>hibp_passwords</code> — k-anonymity password breach lookup (password never leaves host)</li>
+        <li><code>malware_bazaar</code> — abuse.ch sample lookup (needs key)</li>
+      </ul>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">hardening (4)</h3>
+      <ul>
+        <li><code>web_hardening</code>  — HSTS, X-Frame-Options, CSP, COOP / COEP / CORP</li>
+        <li><code>well_known</code>     — /.well-known/* paths (24 checks)</li>
+        <li><code>subdomain_brute</code>— 288-candidate DNS resolve sweep</li>
+        <li><code>passive_dns</code>    — AlienVault OTX + HackerTarget DNS history</li>
+      </ul>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">active recon (7) <span class="text-dim text-xs">— refuses in <code>--opsec</code> unless overridden</span></h3>
+      <ul>
+        <li><code>route_discover</code> — dirsearch-style; 218 paths × 10 categories; 3-baseline soft-404</li>
+        <li><code>subdomain_permute</code>— altdns-style; 40 patterns × known labels</li>
+        <li><code>port_scan</code>      — Top-50 TCP-connect + 256 B banner grab</li>
+        <li><code>waf_detect</code>     — 11 WAF/CDN signatures via headers</li>
+        <li><code>cms_detect</code>     — WordPress / Drupal / Joomla generator + manifests</li>
+        <li><code>graphql_probe</code>  — Introspection probe on /graphql, /graphiql, /api/graphql, /v1, /v2 (401/403/422 detected)</li>
+        <li><code>source_maps</code>    — 13 common bundler .js.map paths (Vite, webpack, CRA, Next.js)</li>
+      </ul>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">v4.2 free sources (6) <span class="text-accent text-xs">— new</span></h3>
+      <ul>
+        <li><code>favicon_hash</code>   — Shodan MMH3 favicon pivot (in-tree, no <code>mmh3</code> dep). Rejects RFC1918 / loopback / metadata IPs.</li>
+        <li><code>wayback_urls</code>   — Wayback CDX historical URLs + forgotten subdomains</li>
+        <li><code>certspotter</code>    — Independent CT-log subdomain enum (crt.sh fallback)</li>
+        <li><code>ripestat</code>       — RIPE Data API · ASN/prefix/abuse-contact. Private IP gate.</li>
+        <li><code>hackertarget</code>   — Free-tier hostsearch + reverse-IP</li>
+        <li><code>subdomain_takeover</code>— CNAME + direct-A vs 24 <code>can-i-take-over-xyz</code> fingerprints (HIGH/CRITICAL on body match)</li>
+      </ul>
+    </section>
+
+    <!-- ═════ 05 PROFILES ═════ -->
+    <section id="profiles" class="mb-16">
+      <h2 class="text-2xl font-bold">05 · profiles</h2>
+      <p class="mt-4">A profile is a named module bundle. Apply with <code>--profile NAME</code>; per-flag <code>--enable</code>/<code>--disable</code> still overrides.</p>
+
+      <table class="mt-6">
+        <thead><tr><th>name</th><th>count</th><th>intent</th></tr></thead>
+        <tbody>
+          <tr><td><code>default</code> / <code>all</code> / <code>deep</code></td><td>44</td><td>Everything (tier-A + tier-B + v4.2 sources)</td></tr>
+          <tr><td><code>quick</code></td><td>20</td><td>Tier-A only — fast triage, never noisy</td></tr>
+          <tr><td><code>person</code></td><td>10</td><td>username, email, phone, telegram, whatsapp, patterns, pgp, github_leaks, discovery</td></tr>
+          <tr><td><code>domain-recon</code></td><td>18</td><td>DNS + CT + ASN + Wayback + RIPE + tech stack</td></tr>
+          <tr><td><code>red-team</code></td><td>34</td><td>domain-recon + active probes + v4.2 modules</td></tr>
+          <tr><td><code>active-recon</code></td><td>10</td><td>Just the loud probes (route_discover, port_scan, etc.)</td></tr>
+          <tr><td><code>blue-team</code></td><td>12</td><td>Exposed surface + reputation + hardening</td></tr>
+          <tr><td><code>ioc</code></td><td>5</td><td>"is this IP/domain known-bad?" minimal noise</td></tr>
+          <tr><td><code>creds</code></td><td>3</td><td>password/hash/username breach triage</td></tr>
+          <tr><td><code>leak-hunt</code></td><td>4</td><td>repos + buckets + waybacks + well-known</td></tr>
+        </tbody>
+      </table>
+
+      <pre class="mt-7"><span class="text-dim">$</span> osint github.com <span class="text-accent">--profile quick</span>             <span class="text-dim"># ~5 s</span>
+<span class="text-dim">$</span> osint github.com <span class="text-accent">--profile red-team --pivot 1</span> <span class="text-dim"># ~30 s + 1 auto-pivot depth</span></pre>
+    </section>
+
+    <!-- ═════ 06 OPSEC ═════ -->
+    <section id="opsec" class="mb-16">
+      <h2 class="text-2xl font-bold">06 · opsec mode</h2>
+      <p class="mt-4">Activate with <code>--opsec</code> (or env <code>OSINT_OPSEC=1</code>). Effects:</p>
+      <ul>
+        <li>HTTP routed via SOCKS5 (<code>127.0.0.1:9050</code> by default — adjust via <code>OSINT_TOR_PROXY</code>)</li>
+        <li>Per-request 250–1500 ms jitter</li>
+        <li>UA rotation across a pool of 12 desktop browsers</li>
+        <li>AI explain disabled — findings never leave the host</li>
+        <li>Active modules <strong>refuse to run</strong> by default</li>
+      </ul>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Per-module override</h3>
+      <p>Each refusing module honours a dedicated env var. Set both <code>OSINT_OPSEC=1</code> AND the override:</p>
+      <table class="mt-4">
+        <thead><tr><th>module</th><th>override env</th></tr></thead>
+        <tbody>
+          <tr><td><code>route_discover</code></td><td><code>OSINT_ROUTE_DISCOVER_OVER_TOR=1</code></td></tr>
+          <tr><td><code>port_scan</code></td><td><code>OSINT_PORT_SCAN_OVER_TOR=1</code></td></tr>
+          <tr><td><code>favicon_hash</code></td><td><code>OSINT_FAVICON_HASH_OVER_TOR=1</code></td></tr>
+          <tr><td><code>subdomain_takeover</code></td><td><code>OSINT_SUBDOMAIN_TAKEOVER_OVER_TOR=1</code></td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-warn">
+        <strong>Reasoning:</strong> high-volume active probing through Tor is slow AND loud at the exit node. Prefer a dedicated VPS for active recon behind OPSEC. The override env is an opt-in escape valve, not a default.
+      </div>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Verify OPSEC is leak-free</h3>
+      <pre><span class="text-dim">$</span> osint opsec-check --opsec
+<span class="text-g">✓</span> egress IP differs from clearnet
+<span class="text-g">✓</span> Tor exit detected: <span class="text-accent">185.220.101.32</span>
+<span class="text-g">✓</span> UA rotation: 5 distinct UAs across 5 calls
+<span class="text-g">✓</span> jitter stdev: 480 ms</pre>
+    </section>
+
+    <!-- ═════ 07 GRAPH ═════ -->
+    <section id="graph" class="mb-16">
+      <h2 class="text-2xl font-bold">07 · entity graph</h2>
+      <p class="mt-4">Every scan derives entities from hits and stores them in the local SQLite DB. The graph has <strong>19 entity types</strong> (DOMAIN, IP, ASN, CERT, BUCKET, EMAIL, USERNAME, …) and <strong>33 edge types</strong> (RESOLVES_TO, ANNOUNCES, ALIASES, CONTROLS, BREACHED_IN, EXPOSES_PORT, …).</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Inspect</h3>
+      <pre><span class="text-dim">$</span> osint graph stats
+  entities: <span class="text-accent">1,847</span>
+  edges:    <span class="text-accent">3,201</span>
+  db:       ~/Library/Application Support/mytools-osint/mytools.sqlite3
+
+<span class="text-dim">$</span> osint graph show domain github.com --depth 2</pre>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Export</h3>
+      <pre><span class="text-dim">$</span> osint graph export domain github.com --format gexf      <span class="text-dim"># Gephi</span>
+<span class="text-dim">$</span> osint graph export domain github.com --format graphml   <span class="text-dim"># yEd, Cytoscape</span>
+<span class="text-dim">$</span> osint graph export domain github.com --format cytoscape <span class="text-dim"># JSON</span></pre>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Auto-pivot</h3>
+      <p>Use <code>--pivot DEPTH</code> on any scan to expand from discovered entities, bounded by per-edge cost budget (default total budget = 12.0, per-kind cap = 8).</p>
+      <pre><span class="text-dim">$</span> osint github.com --profile red-team <span class="text-accent">--pivot 2</span></pre>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">GDPR-style erasure</h3>
+      <pre><span class="text-dim">$</span> osint graph forget domain github.com
+  forgot 1 entity (cascade-deleted 47 edges)</pre>
+    </section>
+
+    <!-- ═════ 08 AI ═════ -->
+    <section id="ai" class="mb-16">
+      <h2 class="text-2xl font-bold">08 · ai explain (optional)</h2>
+      <p class="mt-4">Pass <code>--explain</code> to forward hits to Claude (haiku by default; <code>--explain-model sonnet</code> for deeper). Requires <code>ANTHROPIC_API_KEY</code>. Disabled in <code>--opsec</code> mode for privacy.</p>
+      <pre><span class="text-dim">$</span> osint github.com <span class="text-accent">--explain</span>
+<span class="text-dim">$</span> osint github.com <span class="text-accent">--explain --explain-model sonnet</span></pre>
+      <div class="callout callout-info">
+        <strong>Local-first:</strong> AI calls receive only the hit titles + details + URLs. The raw target value is never forwarded unless it appears verbatim in a hit detail.
+      </div>
+    </section>
+
+    <!-- ═════ 09 SIEM ═════ -->
+    <section id="siem" class="mb-16">
+      <h2 class="text-2xl font-bold">09 · siem export</h2>
+      <p class="mt-4">Push stored findings to your existing pipeline. Four targets supported:</p>
+      <pre><span class="text-dim">$</span> osint export domain github.com --to splunk      <span class="text-dim"># env: SPLUNK_HEC_URL, SPLUNK_HEC_TOKEN</span>
+<span class="text-dim">$</span> osint export domain github.com --to elastic     <span class="text-dim"># env: ELASTIC_URL, ELASTIC_API_KEY</span>
+<span class="text-dim">$</span> osint export domain github.com --to syslog      <span class="text-dim"># env: SYSLOG_HOST, SYSLOG_PORT</span>
+<span class="text-dim">$</span> osint export domain github.com --to misp        <span class="text-dim"># env: MISP_URL, MISP_KEY</span></pre>
+      <p class="text-sm text-dim mt-3">Each hit becomes a structured event with <code>module</code>, <code>source</code>, <code>category</code>, <code>severity</code>, <code>title</code>, <code>detail</code>, <code>url</code>, <code>extra</code> JSON, and MITRE ATT&amp;CK technique IDs when known.</p>
+    </section>
+
+    <!-- ═════ 10 DASHBOARD ═════ -->
+    <section id="dashboard" class="mb-16">
+      <h2 class="text-2xl font-bold">10 · web dashboard</h2>
+      <p class="mt-4">A local HTTP + SSE dashboard that streams hits as they land and renders the entity graph as an interactive Verlet force-graph (vanilla JS, ~21 KB).</p>
+      <pre><span class="text-dim">$</span> osint serve <span class="text-accent">--port 8765</span>
+  serving on http://127.0.0.1:8765 — open in browser</pre>
+      <p class="text-sm text-dim">Zero external deps. stdlib <code>asyncio</code> HTTP server. Bind explicitly to <code>127.0.0.1</code>; never exposed on a wildcard interface.</p>
+    </section>
+
+    <!-- ═════ 11 THEMES ═════ -->
+    <section id="themes" class="mb-16">
+      <h2 class="text-2xl font-bold">11 · themes</h2>
+      <p class="mt-4">Press <code>Shift+T</code> in the main menu to open the picker. 7 palettes:</p>
+      <ul>
+        <li><code>github-dark</code>      — default; classic blue accent</li>
+        <li><code>github-light</code>     — Primer-style</li>
+        <li><code>dracula</code>          — purple accent, lime greens</li>
+        <li><code>nord</code>             — cool slate</li>
+        <li><code>tokyo-night</code>      — warm blue + pink</li>
+        <li><code>catppuccin-mocha</code> — pastel mocha</li>
+        <li><code>high-contrast</code>    — WCAG AAA</li>
+      </ul>
+      <p class="mt-4">Persisted to <code>~/.config/mytools-osint/theme</code>. Env override:</p>
+      <pre><span class="text-dim">$</span> BLUETM_THEME=dracula osint</pre>
+      <p class="text-sm text-dim">Env wins over persistence (UNIX convention) — use it for one-shot overrides.</p>
+    </section>
+
+    <!-- ═════ 12 CONFIG ═════ -->
+    <section id="config" class="mb-16">
+      <h2 class="text-2xl font-bold">12 · config + api keys</h2>
+      <p class="mt-4">Default: all 45 modules run on free APIs with no keys. A handful become more useful with optional free-tier keys:</p>
+      <table>
+        <thead><tr><th>env var</th><th>module(s)</th><th>get key from</th></tr></thead>
+        <tbody>
+          <tr><td><code>ABUSE_CH_API_KEY</code></td><td>threat_intel · malware_bazaar</td><td>auth.abuse.ch (free)</td></tr>
+          <tr><td><code>SHODAN_API_KEY</code></td><td>shodan_internetdb (extended)</td><td>shodan.io (free 100 req/mo)</td></tr>
+          <tr><td><code>ANTHROPIC_API_KEY</code></td><td><code>--explain</code></td><td>console.anthropic.com</td></tr>
+          <tr><td><code>GITHUB_TOKEN</code></td><td>github_leaks (code-search)</td><td>github.com personal-token</td></tr>
+          <tr><td><code>TELEGRAM_API_ID</code> + <code>TELEGRAM_API_HASH</code></td><td>phone (Telegram MTProto)</td><td>my.telegram.org/apps</td></tr>
+        </tbody>
+      </table>
+      <p class="mt-4">Configure via the wizard:</p>
+      <pre><span class="text-dim">$</span> osint config wizard</pre>
+    </section>
+
+    <!-- ═════ 13 TROUBLESHOOTING ═════ -->
+    <section id="troubleshoot" class="mb-16">
+      <h2 class="text-2xl font-bold">13 · troubleshooting</h2>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">First launch is slow (8–12 s)</h3>
+      <p>Nuitka onefile self-extracts to a per-user temp dir. Subsequent runs are instant. To skip the extract, install via <code>brew</code> / <code>scoop</code> (still onefile) or, when published, <code>pipx install mytools-osint</code>.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">SmartScreen / antivirus flags the .exe</h3>
+      <p>Nuitka onefile binaries are a known false-positive source. SHA-256 in <code>SHA256SUMS-vX.Y.Z</code> matches the GitHub Actions build. Submit a clean-file report to your AV if needed.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3"><code>--opsec</code> fails with <code>socksio not installed</code></h3>
+      <p>The Nuitka onefile bundles <code>httpx[socks]</code> as of v4.2.2; older builds did not. Upgrade with <code>brew upgrade mytools-osint</code> or re-run the one-line installer.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3"><code>wayback_urls</code> times out</h3>
+      <p>Wayback CDX is genuinely slow for busy targets. v4.2.2 dropped the per-call timeout to 12 s and surfaces timeouts as <code>NO_DATA</code> instead of <code>ERROR</code>.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Skip the splash on the brew binary</h3>
+      <p>Pass <code>--no-splash</code>, <code>--no-banner</code>, or pipe stdout (the splash is auto-suppressed for non-TTY).</p>
+    </section>
+
+    <!-- ═════ 14 FAQ ═════ -->
+    <section id="faq" class="mb-16">
+      <h2 class="text-2xl font-bold">14 · faq</h2>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Is this legal to run against any host?</h3>
+      <p>No. You are responsible for ensuring you have authorisation to investigate every target you submit. Passive modules (CT logs, RIPE, Wayback) query public records and are widely considered safe. Active modules (route_discover, port_scan, favicon fetch, takeover probe) make probes against the target — only run them on hosts you own or are authorised to test.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Does this tool exfiltrate findings?</h3>
+      <p>No. Findings are stored locally in <code>~/Library/Application Support/mytools-osint/mytools.sqlite3</code> (macOS) / <code>~/.local/share/mytools-osint/</code> (Linux) / <code>%APPDATA%\mytools-osint\</code> (Windows). No telemetry. AI explain is opt-in and disabled in <code>--opsec</code>.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Why MIT?</h3>
+      <p>Default to permissive. Use the tool, fork it, ship downstream. The disclaimer in <code>SECURITY.md</code> covers liability.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Will you accept module contributions?</h3>
+      <p>Yes — open an issue first to discuss scope. Required: free API or local computation, MIT/BSD/Apache deps, no telemetry, no GPL.</p>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">Where do I report a security issue?</h3>
+      <p>Open a private security advisory on GitHub: <a href="https://github.com/Azizbek16l/mytools-osint/security/advisories/new" target="_blank" rel="noopener" class="text-accent und">github.com/.../security/advisories/new</a>. Critical scope: bypass of <code>--opsec</code> SOCKS routing, credential / data exfiltration, SSRF, RCE.</p>
+    </section>
+
+    <hr class="border-line my-12">
+
+    <footer class="text-xs text-dim flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+      <span>© 2026 Bluetm.uz · MIT License</span>
+      <span class="cursor">end of reference</span>
+    </footer>
+
+  </article>
+</div>
+
+<script>
+  // Highlight the current section in the sidebar TOC
+  const sections = document.querySelectorAll('section[id]');
+  const links = document.querySelectorAll('.toc a[href^="#"]');
+  const map = new Map();
+  links.forEach(a => map.set(a.getAttribute('href').slice(1), a));
+
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(a => a.classList.remove('active'));
+        const a = map.get(e.target.id);
+        if (a) a.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-30% 0px -55% 0px', threshold: 0 });
+  sections.forEach(s => obs.observe(s));
+</script>
+</body>
+</html>

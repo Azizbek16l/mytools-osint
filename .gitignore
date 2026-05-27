@@ -44,3 +44,15 @@ nuitka-crash-report.xml
 Thumbs.db
 .DS_Store
 dist-pypi/
+
+# Hide AI-assistant artefacts from public history
+CLAUDE.md
+.claude/
+.cursor/
+.aider*
+.openai/
+agent/
+PLAN.md
+SESSION_*.md
+NOTES_*.md
+*_PLAN.md

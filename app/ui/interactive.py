@@ -1709,7 +1709,6 @@ async def _action_theme_picker() -> None:
         r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
         return f"\x1b[38;2;{r};{g};{b}m{ch}\x1b[0m"
 
-    default_label: str | None = None
     choices = []
     for name, tk in THEMES.items():
         marker = "●" if name == current_name else "○"
@@ -1717,13 +1716,13 @@ async def _action_theme_picker() -> None:
                   + _swatch(tk.WARN) + _swatch(tk.BAD))
         label = f"  {marker}  {name:<22}  {sample}"
         choices.append(Choice(label, value=name))
-        if name == current_name:
-            default_label = label
     choices.append(Choice("  ← back (keep current)", value="__BACK__"))
+    # questionary's `default` is matched against Choice.value, not label.
+    # Pass the current theme NAME so cursor lands on the active row.
     pick = await questionary.select(
         "pick a theme (saved to ~/.config/mytools-osint/theme):",
         choices=choices, style=QSTYLE, qmark="",
-        default=default_label,  # cursor starts on the active theme — prevents accidental clobber
+        default=current_name,  # cursor starts on the active theme
         instruction="(↑↓ navigate · ↵ apply · ← back)",
     ).ask_async()
     if pick is None or pick == "__BACK__":

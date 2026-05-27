@@ -1,0 +1,721 @@
+<!doctype html>
+<html lang="en" class="bg-[#0D1117]">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>mytools-osint · OSINT CLI for serious recon</title>
+<meta name="description" content="OSINT CLI with 45 modules, entity-graph correlation, auto-pivot, free APIs only. Authorised security testing only." />
+<meta property="og:title" content="mytools-osint · OSINT CLI" />
+<meta property="og:description" content="45 modules · single-fire shell · entity graph · free APIs · authorised use only" />
+<meta property="og:type" content="website" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      fontFamily: { mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'] },
+      colors: {
+        bg:    '#0D1117',
+        panel: '#161B22',
+        line:  '#21262D',
+        fg:    '#C9D1D9',
+        dim:   '#6E7681',
+        accent:'#58A6FF',
+        ok:    '#3FB950',
+        warn:  '#D29922',
+        bad:   '#F85149',
+      },
+    }
+  }
+}
+</script>
+<style>
+  html, body { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  body {
+    background:
+      radial-gradient(60rem 40rem at 90% -10%, rgba(88,166,255,0.10), transparent 70%),
+      radial-gradient(50rem 30rem at -10% 30%, rgba(63,185,80,0.05), transparent 70%),
+      #0D1117;
+    color: #C9D1D9;
+    font-feature-settings: "calt" 1, "liga" 1, "zero" 1, "ss01" 1;
+    background-attachment: fixed;
+  }
+  /* Subtle CRT scanlines over the hero */
+  .scanlines::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image: linear-gradient(rgba(255,255,255,0.02) 50%, transparent 50%);
+    background-size: 100% 3px;
+    pointer-events: none;
+    opacity: 0.5;
+    z-index: 0;
+  }
+  /* Blinking terminal cursor */
+  .cursor::after {
+    content: "█";
+    color: #58A6FF;
+    animation: blink 1.1s steps(1,end) infinite;
+    margin-left: 0.05em;
+  }
+  @keyframes blink { 50% { opacity: 0 } }
+
+  /* Hover flip: terminal selection style */
+  a.flip, button.flip, .flip {
+    transition: background 0.1s, color 0.1s;
+  }
+  a.flip:hover, button.flip:hover {
+    background: #C9D1D9; color: #0D1117;
+  }
+
+  /* Slow gradient glow under section headings */
+  .section-h::after {
+    content: "";
+    display: block;
+    height: 1px; width: 6rem;
+    background: linear-gradient(90deg, #58A6FF, transparent);
+    margin-top: 0.5rem;
+  }
+
+  /* ASCII box borders with corners via box-decoration tricks */
+  .ascii-box {
+    border: 1px solid #21262D;
+    background:
+      linear-gradient(90deg, #0D1117 0 0) padding-box,
+      linear-gradient(135deg, #58A6FF22 0%, #21262D 25%, #21262D 75%, #3FB95022 100%) border-box;
+    border: 1px solid transparent;
+  }
+  /* Reset for ascii-box-plain — used inside dense lists */
+  .box-plain { border: 1px solid #21262D; }
+
+  /* Terminal pane: prompt prefix coloration */
+  .term .p { color: #58A6FF; }
+  .term .c { color: #6E7681; }
+  .term .g { color: #3FB950; }
+  .term .r { color: #F85149; }
+  .term .w { color: #D29922; }
+  .term .acc { color: #C9D1D9; font-weight: 500; }
+
+  /* Type-in animation for hero example */
+  .reveal { opacity: 0; animation: rev 0.45s ease-out forwards; }
+  .reveal[data-d="0"] { animation-delay: 0.0s }
+  .reveal[data-d="1"] { animation-delay: 0.20s }
+  .reveal[data-d="2"] { animation-delay: 0.40s }
+  .reveal[data-d="3"] { animation-delay: 0.60s }
+  .reveal[data-d="4"] { animation-delay: 0.85s }
+  .reveal[data-d="5"] { animation-delay: 1.10s }
+  .reveal[data-d="6"] { animation-delay: 1.35s }
+  .reveal[data-d="7"] { animation-delay: 1.60s }
+  .reveal[data-d="8"] { animation-delay: 1.85s }
+  @keyframes rev { from { opacity: 0; transform: translateY(3px) } to { opacity: 1; transform: none } }
+
+  /* Subtle floating noise — adds film-grain texture */
+  .grain {
+    position: fixed; inset: 0; pointer-events: none; z-index: 1;
+    opacity: 0.025;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85'/></filter><rect width='160' height='160' filter='url(%23n)' opacity='0.7'/></svg>");
+  }
+
+  /* Selection */
+  ::selection { background: #58A6FF; color: #0D1117; }
+
+  /* Smooth scroll for anchors */
+  html { scroll-behavior: smooth; scroll-padding-top: 5rem; }
+
+  /* Tab buttons (install) — active state */
+  .tab[aria-selected="true"] {
+    color: #C9D1D9;
+    border-color: #58A6FF;
+    background: rgba(88,166,255,0.06);
+  }
+  .tab { border-color: #21262D; color: #6E7681; }
+
+  /* Feature card hover lift */
+  .card { transition: transform 0.15s, border-color 0.15s, background 0.15s; }
+  .card:hover { transform: translateY(-2px); border-color: #58A6FF; background: rgba(88,166,255,0.03); }
+
+  /* Disclaimer warning stripe */
+  .stripes {
+    background-image: repeating-linear-gradient(
+      135deg,
+      rgba(210,153,34,0.07) 0,
+      rgba(210,153,34,0.07) 12px,
+      transparent 12px,
+      transparent 24px
+    );
+  }
+
+  /* Footer underline only on hover */
+  a.und { text-decoration: none; }
+  a.und:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+  /* ===== bilingual EN/UZ ===== */
+  /* Both languages ship in the DOM for SEO; CSS hides the inactive one */
+  body[data-lang="en"] [lang="uz"] { display: none !important; }
+  body[data-lang="uz"] [lang="en"] { display: none !important; }
+  .lang-toggle button[aria-pressed="true"] { color:#C9D1D9; background: rgba(88,166,255,0.12); }
+  .lang-toggle button { color:#6E7681; }
+</style>
+</head>
+
+<body class="text-fg antialiased" data-lang="en">
+<div class="grain"></div>
+
+<!-- ═════ NAV ═════ -->
+<nav class="sticky top-0 z-30 bg-bg/85 backdrop-blur-md border-b border-line">
+  <div class="max-w-6xl mx-auto px-5 sm:px-8 py-3.5 flex items-center gap-4">
+    <a href="#top" class="flex items-center gap-2.5 text-fg font-bold tracking-tight">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#58A6FF" stroke-width="1.5">
+        <path d="M3 4h6v6H3zM15 4h6v6h-6zM3 14h6v6H3zM15 14h6v6h-6z"/>
+        <path d="M12 7v10M7 12h10" stroke="#58A6FF" stroke-width="1"/>
+      </svg>
+      <span>mytools-osint</span>
+      <span class="hidden sm:inline ml-1 px-1.5 py-0.5 text-[10px] font-medium text-accent border border-line bg-panel">v4.2.2</span>
+    </a>
+    <div class="ml-auto hidden md:flex items-center gap-1 text-sm text-dim">
+      <a href="#install"   class="flip px-3 py-1.5"><span lang="en">install</span><span lang="uz">o'rnatish</span></a>
+      <span class="text-line">│</span>
+      <a href="#modules"   class="flip px-3 py-1.5"><span lang="en">modules</span><span lang="uz">modullar</span></a>
+      <span class="text-line">│</span>
+      <a href="#profiles"  class="flip px-3 py-1.5"><span lang="en">profiles</span><span lang="uz">profillar</span></a>
+      <span class="text-line">│</span>
+      <a href="#use-cases" class="flip px-3 py-1.5"><span lang="en">use cases</span><span lang="uz">misollar</span></a>
+      <span class="text-line">│</span>
+      <a href="./docs.html" class="flip px-3 py-1.5"><span lang="en">docs</span><span lang="uz">hujjat</span></a>
+      <span class="text-line">│</span>
+      <a href="https://github.com/Azizbek16l/mytools-osint" target="_blank" rel="noopener" class="flip px-3 py-1.5 inline-flex items-center gap-1.5">
+        github
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M9 7h8v8"/></svg>
+      </a>
+      <span class="text-line ml-2">│</span>
+      <span class="lang-toggle ml-1 inline-flex border border-line">
+        <button type="button" data-set-lang="en" aria-pressed="true"  class="flip px-2.5 py-1 text-xs">EN</button>
+        <button type="button" data-set-lang="uz" aria-pressed="false" class="flip px-2.5 py-1 text-xs">UZ</button>
+      </span>
+    </div>
+    <span class="md:hidden lang-toggle ml-auto inline-flex border border-line">
+      <button type="button" data-set-lang="en" aria-pressed="true"  class="flip px-2 py-1 text-xs">EN</button>
+      <button type="button" data-set-lang="uz" aria-pressed="false" class="flip px-2 py-1 text-xs">UZ</button>
+    </span>
+  </div>
+</nav>
+
+<!-- ═════ HERO ═════ -->
+<section id="top" class="relative scanlines">
+  <div class="max-w-6xl mx-auto px-5 sm:px-8 pt-16 pb-20 sm:pt-24 sm:pb-28 relative z-10">
+
+    <!-- Status pill row -->
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-dim mb-10">
+      <span class="text-ok">●</span><span lang="en">release</span><span lang="uz">reliz</span>
+      <span class="text-fg">v4.2.2</span>
+      <span class="text-line">·</span>
+      <span lang="en">245 tests passing</span><span lang="uz">245 test o'tdi</span>
+      <span class="text-line">·</span>
+      <span class="text-accent">MIT</span>
+      <span class="text-line">·</span>
+      <a href="https://github.com/Azizbek16l/mytools-osint/blob/main/CHANGELOG.md" class="flip px-1 underline-offset-2 hover:underline" target="_blank"><span lang="en">changelog</span><span lang="uz">o'zgarishlar</span></a>
+    </div>
+
+    <!-- Heading: tight typography, big mono, no fluff -->
+    <h1 class="text-[2.5rem] leading-[1.05] sm:text-[3.75rem] sm:leading-[1.02] font-bold tracking-tight">
+      <span lang="en">
+        <span class="block">OSINT CLI for</span>
+        <span class="block text-accent">serious recon.</span>
+      </span>
+      <span lang="uz">
+        <span class="block">Jiddiy razvedka</span>
+        <span class="block text-accent">uchun OSINT CLI.</span>
+      </span>
+    </h1>
+    <p lang="en" class="mt-7 max-w-2xl text-sm sm:text-base text-dim leading-relaxed">
+      <span class="text-fg">45 modules</span> across passive + active reconnaissance.
+      <span class="text-fg">Single-fire shell</span> with k9s-grade ergonomics.
+      <span class="text-fg">Entity graph</span> + bounded BFS auto-pivot.
+      <span class="text-fg">Free APIs only</span>, no paid keys.
+      <span class="text-warn">Authorised security testing only.</span>
+    </p>
+    <p lang="uz" class="mt-7 max-w-2xl text-sm sm:text-base text-dim leading-relaxed">
+      Passiv va faol razvedka uchun <span class="text-fg">45 modul</span>.
+      <span class="text-fg">Bir-tugma shell</span> &mdash; k9s darajasidagi qulaylik.
+      <span class="text-fg">Entity-graph</span> &middot; bog'liq mavjudotlar zanjirini avtomatik kuzatadi.
+      <span class="text-fg">Faqat bepul API'lar</span>, hech qanday pulli kalit kerak emas.
+      <span class="text-warn">Faqat ruxsat etilgan xavfsizlik testi uchun.</span>
+    </p>
+
+    <!-- Quick CTA buttons -->
+    <div class="mt-8 flex flex-wrap items-center gap-3 text-sm">
+      <a href="#install" class="flip border border-accent text-accent px-4 py-2.5 inline-flex items-center gap-2 font-medium">
+        <span lang="en">$ install ↓</span><span lang="uz">$ o'rnatish ↓</span>
+      </a>
+      <a href="https://github.com/Azizbek16l/mytools-osint" target="_blank" rel="noopener" class="flip border border-line text-fg px-4 py-2.5 inline-flex items-center gap-2">
+        ★ github
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M9 7h8v8"/></svg>
+      </a>
+      <a href="https://github.com/Azizbek16l/mytools-osint/releases/latest" target="_blank" rel="noopener" class="flip border border-line text-fg px-4 py-2.5 inline-flex items-center gap-2">
+        <span lang="en">releases →</span><span lang="uz">relizlar →</span>
+      </a>
+    </div>
+
+    <!-- Terminal demo block -->
+    <div class="mt-14 sm:mt-16 box-plain bg-panel relative overflow-hidden">
+      <!-- terminal title bar -->
+      <div class="flex items-center gap-2 px-4 py-2 border-b border-line text-xs text-dim">
+        <span class="text-bad">●</span>
+        <span class="text-warn">●</span>
+        <span class="text-ok">●</span>
+        <span class="ml-3 text-fg">osint — interactive shell</span>
+        <span class="ml-auto hidden sm:inline">~/work · 80×24</span>
+      </div>
+      <pre class="term overflow-x-auto p-5 sm:p-7 text-[12.5px] sm:text-[13px] leading-[1.65] m-0">
+<span class="reveal" data-d="0"><span class="c">$</span> <span class="acc">osint</span></span>
+<span class="reveal" data-d="1"><span class="c">  what are you looking for?</span>
+<span class="c">     examples:</span>  temur   satya@microsoft.com   <span class="acc">+998 90 123 45 67</span>   @durov   github.com
+<span class="c">     tab complete · → accept ghost text · Ctrl-R history · /help</span></span>
+
+<span class="reveal" data-d="2"><span class="p">❯</span> github.com <span class="c">[DOMAIN] · 32 modules · 4.2s</span></span>
+<span class="reveal" data-d="3">  <span class="g">●</span> Scanning   github.com        <span class="c">[DOMAIN] · 32 modules · 4.2s elapsed</span></span>
+<span class="reveal" data-d="4">  <span class="g">✓</span> <span class="acc">certspotter</span>          <span class="c">39 subdomains via CT logs</span></span>
+<span class="reveal" data-d="5">  <span class="g">✓</span> <span class="acc">favicon_hash</span>         mmh3=<span class="acc">1848946384</span>  <span class="c">→ shodan.io/search?…</span></span>
+<span class="reveal" data-d="6">  <span class="g">✓</span> <span class="acc">wayback_urls</span>         <span class="c">250 archived URLs + 17 historical subdomains</span></span>
+<span class="reveal" data-d="7">  <span class="r">✗</span> <span class="acc">subdomain_takeover</span>   <span class="c">0/32 hosts CRITICAL</span></span>
+<span class="reveal" data-d="8">  <span class="w">graph:</span> +<span class="acc">298</span> entities · +<span class="acc">299</span> edges  <span class="c">→ osint graph show domain github.com</span></span>
+<span class="reveal cursor" data-d="8"></span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ═════ INSTALL ═════ -->
+<section id="install" class="border-t border-line">
+  <div class="max-w-6xl mx-auto px-5 sm:px-8 py-16 sm:py-24">
+
+    <div class="flex items-end justify-between gap-6 flex-wrap">
+      <div>
+        <div class="text-xs text-accent uppercase tracking-widest">01 // install</div>
+        <h2 class="section-h text-2xl sm:text-3xl font-bold mt-3">One command. Pick a platform.</h2>
+      </div>
+      <span class="text-xs text-dim">SHA-256 verified · MIT · zero phone-home</span>
+    </div>
+
+    <!-- tab strip -->
+    <div role="tablist" aria-label="install commands"
+         class="mt-10 flex flex-wrap gap-0 border-b border-line text-sm">
+      <button role="tab" id="tab-unix"  data-tab="unix"  aria-selected="true"  class="tab flip px-4 py-3 border-b-2">macOS + Linux</button>
+      <button role="tab" id="tab-win"   data-tab="win"   aria-selected="false" class="tab flip px-4 py-3 border-b-2">Windows</button>
+      <button role="tab" id="tab-brew"  data-tab="brew"  aria-selected="false" class="tab flip px-4 py-3 border-b-2">brew</button>
+      <button role="tab" id="tab-scoop" data-tab="scoop" aria-selected="false" class="tab flip px-4 py-3 border-b-2">scoop</button>
+      <button role="tab" id="tab-wing"  data-tab="winget" aria-selected="false" class="tab flip px-4 py-3 border-b-2">winget</button>
+      <button role="tab" id="tab-dir"   data-tab="direct" aria-selected="false" class="tab flip px-4 py-3 border-b-2">direct</button>
+    </div>
+
+    <!-- panes -->
+    <div class="grid gap-6 mt-8">
+      <div data-pane="unix" class="install-pane">
+        <p class="text-sm text-dim mb-3">Linux + macOS · curl pipe to bash · pins to <span class="text-fg">~/.local/bin</span> · no sudo.</p>
+        <div class="install-row" data-cmd="curl -fsSL https://raw.githubusercontent.com/Azizbek16l/mytools-osint/main/scripts/install.sh | bash">
+          <span class="text-dim mr-3">$</span><code>curl -fsSL https://raw.githubusercontent.com/Azizbek16l/mytools-osint/main/scripts/install.sh | bash</code>
+        </div>
+      </div>
+
+      <div data-pane="win" class="install-pane hidden">
+        <p class="text-sm text-dim mb-3">Windows PowerShell · downloads to <span class="text-fg">%LOCALAPPDATA%\Programs\mytools-osint</span> · adds to user PATH · no admin.</p>
+        <div class="install-row" data-cmd="irm https://raw.githubusercontent.com/Azizbek16l/mytools-osint/main/scripts/install.ps1 | iex">
+          <span class="text-dim mr-3">PS&gt;</span><code>irm https://raw.githubusercontent.com/Azizbek16l/mytools-osint/main/scripts/install.ps1 | iex</code>
+        </div>
+      </div>
+
+      <div data-pane="brew" class="install-pane hidden">
+        <p class="text-sm text-dim mb-3">macOS arm64 + Linux x86_64 · auto-upgrade via <span class="text-fg">brew upgrade</span>.</p>
+        <div class="install-row" data-cmd="brew tap Azizbek16l/osint && brew install mytools-osint">
+          <span class="text-dim mr-3">$</span><code>brew tap Azizbek16l/osint &amp;&amp; brew install mytools-osint</code>
+        </div>
+      </div>
+
+      <div data-pane="scoop" class="install-pane hidden">
+        <p class="text-sm text-dim mb-3">Windows x64 · auto-upgrade via <span class="text-fg">scoop update</span>.</p>
+        <div class="install-row" data-cmd="scoop bucket add osint https://github.com/Azizbek16l/scoop-bucket && scoop install mytools-osint">
+          <span class="text-dim mr-3">PS&gt;</span><code>scoop bucket add osint https://github.com/Azizbek16l/scoop-bucket &amp;&amp; scoop install mytools-osint</code>
+        </div>
+      </div>
+
+      <div data-pane="winget" class="install-pane hidden">
+        <p class="text-sm text-dim mb-3">Windows x64 · official Microsoft package repo. <span class="text-warn">pending review</span> on each new release.</p>
+        <div class="install-row" data-cmd="winget install Azizbek16l.mytools-osint">
+          <span class="text-dim mr-3">PS&gt;</span><code>winget install Azizbek16l.mytools-osint</code>
+        </div>
+      </div>
+
+      <div data-pane="direct" class="install-pane hidden">
+        <p class="text-sm text-dim mb-3">Pick your platform binary from the release page · verify SHA-256.</p>
+        <div class="grid sm:grid-cols-3 gap-3">
+          <a href="https://github.com/Azizbek16l/mytools-osint/releases/latest/download/osint-macos-arm64" target="_blank" rel="noopener" class="flip box-plain p-4 text-sm">
+            <div class="text-dim text-xs">↓ macOS arm64</div>
+            <div class="text-fg mt-1">osint-macos-arm64</div>
+            <div class="text-dim text-[11px] mt-1">~38 MB · Nuitka onefile</div>
+          </a>
+          <a href="https://github.com/Azizbek16l/mytools-osint/releases/latest/download/osint-linux-x86_64" target="_blank" rel="noopener" class="flip box-plain p-4 text-sm">
+            <div class="text-dim text-xs">↓ Linux x86_64</div>
+            <div class="text-fg mt-1">osint-linux-x86_64</div>
+            <div class="text-dim text-[11px] mt-1">~49 MB · Nuitka onefile</div>
+          </a>
+          <a href="https://github.com/Azizbek16l/mytools-osint/releases/latest/download/osint-windows-x64.exe" target="_blank" rel="noopener" class="flip box-plain p-4 text-sm">
+            <div class="text-dim text-xs">↓ Windows x64</div>
+            <div class="text-fg mt-1">osint-windows-x64.exe</div>
+            <div class="text-dim text-[11px] mt-1">~41 MB · Nuitka onefile</div>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <p class="mt-6 text-xs text-dim">First launch self-extracts (~8–12 s on Nuitka onefile). Subsequent runs are instant.</p>
+  </div>
+</section>
+
+<!-- ═════ FEATURES ═════ -->
+<section id="features" class="border-t border-line bg-panel/30">
+  <div class="max-w-6xl mx-auto px-5 sm:px-8 py-16 sm:py-24">
+    <div class="text-xs text-accent uppercase tracking-widest">02 // features</div>
+    <h2 class="section-h text-2xl sm:text-3xl font-bold mt-3">Built like a tool you'd actually carry.</h2>
+
+    <div class="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-line">
+      <!-- Each card on a 1-px line grid → reads as a true terminal grid -->
+      <div class="card bg-bg p-6">
+        <div class="text-2xl mb-3">🎯</div>
+        <div class="text-fg font-medium">Single-fire shell</div>
+        <p class="text-sm text-dim mt-2 leading-relaxed"><code class="text-accent">q</code> / <code class="text-accent">i</code> / <code class="text-accent">l</code> / <code class="text-accent">m</code> fire instantly. No Enter required. lazygit / k9s / btop ergonomics.</p>
+      </div>
+      <div class="card bg-bg p-6">
+        <div class="text-2xl mb-3">🎨</div>
+        <div class="text-fg font-medium">7 themes, in-app picker</div>
+        <p class="text-sm text-dim mt-2 leading-relaxed">github-dark · github-light · dracula · nord · tokyo-night · catppuccin-mocha · high-contrast. Persisted across launches.</p>
+      </div>
+      <div class="card bg-bg p-6">
+        <div class="text-2xl mb-3">🧬</div>
+        <div class="text-fg font-medium">Entity graph + auto-pivot</div>
+        <p class="text-sm text-dim mt-2 leading-relaxed">19 entity types, 33 edge types. Bounded BFS with per-edge cost budget. Export to GEXF / GraphML / Cytoscape.</p>
+      </div>
+      <div class="card bg-bg p-6">
+        <div class="text-2xl mb-3">🔍</div>
+        <div class="text-fg font-medium">45 modules</div>
+        <p class="text-sm text-dim mt-2 leading-relaxed">Passive + active recon. crt.sh, CertSpotter, RIPEstat, HackerTarget, Wayback, Shodan InternetDB. Free APIs only.</p>
+      </div>
+      <div class="card bg-bg p-6">
+        <div class="text-2xl mb-3">🛡</div>
+        <div class="text-fg font-medium">OPSEC mode</div>
+        <p class="text-sm text-dim mt-2 leading-relaxed">SOCKS5 routing, jitter, UA rotation. Active modules refuse to run unless you set the per-module override env.</p>
+      </div>
+      <div class="card bg-bg p-6">
+        <div class="text-2xl mb-3">🤖</div>
+        <div class="text-fg font-medium">Optional AI explain</div>
+        <p class="text-sm text-dim mt-2 leading-relaxed">Claude haiku/sonnet over findings. Disabled in <code class="text-accent">--opsec</code> mode. Local-first by default.</p>
+      </div>
+      <div class="card bg-bg p-6">
+        <div class="text-2xl mb-3">📤</div>
+        <div class="text-fg font-medium">SIEM exporters</div>
+        <p class="text-sm text-dim mt-2 leading-relaxed">Splunk HEC · Elasticsearch bulk · syslog RFC 5424 · MISP Event API. Ship to your existing pipeline.</p>
+      </div>
+      <div class="card bg-bg p-6">
+        <div class="text-2xl mb-3">📊</div>
+        <div class="text-fg font-medium">Web dashboard</div>
+        <p class="text-sm text-dim mt-2 leading-relaxed">Local-only HTTP + SSE live stream. Vanilla-JS Verlet force-graph. Zero external deps. <code class="text-accent">osint serve</code>.</p>
+      </div>
+      <div class="card bg-bg p-6">
+        <div class="text-2xl mb-3">🕸</div>
+        <div class="text-fg font-medium">Auto-pivot</div>
+        <p class="text-sm text-dim mt-2 leading-relaxed">Discovered entities feed a bounded BFS that follows high-value edges first. <code class="text-accent">--pivot DEPTH</code>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════ MODULES ═════ -->
+<section id="modules" class="border-t border-line">
+  <div class="max-w-6xl mx-auto px-5 sm:px-8 py-16 sm:py-24">
+
+    <div class="text-xs text-accent uppercase tracking-widest">03 // modules</div>
+    <h2 class="section-h text-2xl sm:text-3xl font-bold mt-3">45 modules. Organised by intent.</h2>
+    <p class="mt-3 text-sm text-dim max-w-2xl">Every module is a standalone async coroutine. Mix per-scan with <code class="text-accent">--enable</code> / <code class="text-accent">--disable</code>, or use a profile bundle.</p>
+
+    <div class="mt-12 grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-10">
+
+      <div>
+        <div class="text-fg font-medium flex items-center gap-2 mb-3">
+          <span class="text-accent">▸</span> identity / <span class="text-dim text-xs">6</span>
+        </div>
+        <ul class="text-sm text-dim grid grid-cols-2 gap-y-1 gap-x-4">
+          <li>username</li><li>email</li><li>email_extras</li>
+          <li>phone</li><li>telegram</li><li>whatsapp</li>
+        </ul>
+      </div>
+
+      <div>
+        <div class="text-fg font-medium flex items-center gap-2 mb-3">
+          <span class="text-accent">▸</span> network / <span class="text-dim text-xs">10</span>
+        </div>
+        <ul class="text-sm text-dim grid grid-cols-2 gap-y-1 gap-x-4">
+          <li>ip</li><li>ip_extras</li><li>domain</li><li>discovery</li>
+          <li>patterns</li><li>adjacency</li><li>ssl_tls</li><li>http_headers</li>
+          <li>asn_bgp</li><li>tech_fingerprint</li>
+        </ul>
+      </div>
+
+      <div>
+        <div class="text-fg font-medium flex items-center gap-2 mb-3">
+          <span class="text-accent">▸</span> threat intel / <span class="text-dim text-xs">4</span>
+        </div>
+        <ul class="text-sm text-dim grid grid-cols-2 gap-y-1 gap-x-4">
+          <li>internetdb</li><li>threat_intel</li>
+          <li>takeover</li><li>web_recon</li>
+        </ul>
+      </div>
+
+      <div>
+        <div class="text-fg font-medium flex items-center gap-2 mb-3">
+          <span class="text-accent">▸</span> defense surface / <span class="text-dim text-xs">8</span>
+        </div>
+        <ul class="text-sm text-dim grid grid-cols-2 gap-y-1 gap-x-4">
+          <li>email_security</li><li>typosquat</li><li>pgp_keys</li><li>tor_check</li>
+          <li>github_leaks</li><li>cloud_buckets</li><li>hibp_passwords</li><li>malware_bazaar</li>
+        </ul>
+      </div>
+
+      <div>
+        <div class="text-fg font-medium flex items-center gap-2 mb-3">
+          <span class="text-accent">▸</span> hardening / <span class="text-dim text-xs">4</span>
+        </div>
+        <ul class="text-sm text-dim grid grid-cols-2 gap-y-1 gap-x-4">
+          <li>web_hardening</li><li>well_known</li>
+          <li>subdomain_brute</li><li>passive_dns</li>
+        </ul>
+      </div>
+
+      <div>
+        <div class="text-fg font-medium flex items-center gap-2 mb-3">
+          <span class="text-accent">▸</span> active recon / <span class="text-dim text-xs">7</span>
+        </div>
+        <ul class="text-sm text-dim grid grid-cols-2 gap-y-1 gap-x-4">
+          <li>route_discover</li><li>subdomain_permute</li><li>port_scan</li><li>waf_detect</li>
+          <li>cms_detect</li><li>graphql_probe</li><li>source_maps</li>
+        </ul>
+      </div>
+
+      <div class="md:col-span-2">
+        <div class="text-fg font-medium flex items-center gap-2 mb-3">
+          <span class="text-accent">▸</span> v4.2 free sources / <span class="text-dim text-xs">6 · new</span>
+        </div>
+        <ul class="text-sm text-dim grid grid-cols-2 md:grid-cols-3 gap-y-1 gap-x-4">
+          <li><span class="text-fg">favicon_hash</span>      <span class="text-dim text-xs"> · Shodan MMH3 pivot</span></li>
+          <li><span class="text-fg">wayback_urls</span>      <span class="text-dim text-xs"> · CDX historical URLs</span></li>
+          <li><span class="text-fg">certspotter</span>       <span class="text-dim text-xs"> · CT-log subdomain enum</span></li>
+          <li><span class="text-fg">ripestat</span>          <span class="text-dim text-xs"> · ASN / prefix / abuse</span></li>
+          <li><span class="text-fg">hackertarget</span>      <span class="text-dim text-xs"> · hostsearch + reverse-IP</span></li>
+          <li><span class="text-fg">subdomain_takeover</span><span class="text-dim text-xs"> · CNAME + direct-A check</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════ PROFILES ═════ -->
+<section id="profiles" class="border-t border-line bg-panel/30">
+  <div class="max-w-6xl mx-auto px-5 sm:px-8 py-16 sm:py-24">
+    <div class="text-xs text-accent uppercase tracking-widest">04 // profiles</div>
+    <h2 class="section-h text-2xl sm:text-3xl font-bold mt-3">Curated module bundles.</h2>
+    <p class="mt-3 text-sm text-dim max-w-2xl">12 profiles dial scope by intent — quick triage, deep red-team, blue-team surface, IOC lookup. Pass <code class="text-accent">--profile NAME</code>.</p>
+
+    <div class="mt-10 grid grid-cols-2 md:grid-cols-4 gap-px bg-line">
+      <div class="bg-bg p-5">
+        <div class="text-fg font-medium">quick</div>
+        <div class="text-xs text-dim mt-1">20 modules · tier-A only</div>
+      </div>
+      <div class="bg-bg p-5">
+        <div class="text-fg font-medium">deep</div>
+        <div class="text-xs text-dim mt-1">44 modules · everything</div>
+      </div>
+      <div class="bg-bg p-5">
+        <div class="text-fg font-medium">domain-recon</div>
+        <div class="text-xs text-dim mt-1">18 modules · DNS + CT + ASN</div>
+      </div>
+      <div class="bg-bg p-5">
+        <div class="text-fg font-medium">red-team</div>
+        <div class="text-xs text-dim mt-1">34 modules · active probes</div>
+      </div>
+      <div class="bg-bg p-5">
+        <div class="text-fg font-medium">active-recon</div>
+        <div class="text-xs text-dim mt-1">10 modules · loud only</div>
+      </div>
+      <div class="bg-bg p-5">
+        <div class="text-fg font-medium">blue-team</div>
+        <div class="text-xs text-dim mt-1">12 modules · exposed surface</div>
+      </div>
+      <div class="bg-bg p-5">
+        <div class="text-fg font-medium">ioc</div>
+        <div class="text-xs text-dim mt-1">5 modules · reputation</div>
+      </div>
+      <div class="bg-bg p-5">
+        <div class="text-fg font-medium">leak-hunt</div>
+        <div class="text-xs text-dim mt-1">4 modules · repos + buckets</div>
+      </div>
+      <div class="bg-bg p-5">
+        <div class="text-fg font-medium">creds</div>
+        <div class="text-xs text-dim mt-1">3 modules · pwd/hash triage</div>
+      </div>
+      <div class="bg-bg p-5">
+        <div class="text-fg font-medium">person</div>
+        <div class="text-xs text-dim mt-1">10 modules · identity sweep</div>
+      </div>
+      <div class="bg-bg p-5">
+        <div class="text-fg font-medium">all</div>
+        <div class="text-xs text-dim mt-1">44 modules · alias of deep</div>
+      </div>
+      <div class="bg-bg p-5">
+        <div class="text-fg font-medium">default</div>
+        <div class="text-xs text-dim mt-1">44 modules · no flag needed</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════ USE CASES ═════ -->
+<section id="use-cases" class="border-t border-line">
+  <div class="max-w-6xl mx-auto px-5 sm:px-8 py-16 sm:py-24">
+    <div class="text-xs text-accent uppercase tracking-widest">05 // recipes</div>
+    <h2 class="section-h text-2xl sm:text-3xl font-bold mt-3">Three commands to start with.</h2>
+
+    <div class="mt-10 grid gap-6 lg:grid-cols-3">
+
+      <div class="box-plain p-6 bg-bg flex flex-col">
+        <div class="text-xs text-dim uppercase tracking-widest">recipe 01</div>
+        <div class="text-fg font-medium mt-1">Map a domain's perimeter</div>
+        <p class="text-sm text-dim mt-2 leading-relaxed flex-1">CT-log subs (crt.sh + CertSpotter) + Wayback historical hosts + RIPE ASN + tech fingerprint + HTTP headers. Passive only.</p>
+        <pre class="mt-5 text-[12px] sm:text-[13px] leading-snug box-plain px-3 py-2 bg-panel"><span class="c">$</span> osint github.com <span class="acc">--profile domain-recon</span></pre>
+      </div>
+
+      <div class="box-plain p-6 bg-bg flex flex-col">
+        <div class="text-xs text-dim uppercase tracking-widest">recipe 02</div>
+        <div class="text-fg font-medium mt-1">Hunt subdomain takeovers</div>
+        <p class="text-sm text-dim mt-2 leading-relaxed flex-1">CNAME chain + direct-A check vs 24 <code>can-i-take-over-xyz</code> fingerprints. Favicon hash pivots origin-IP behind CDN.</p>
+        <pre class="mt-5 text-[12px] sm:text-[13px] leading-snug box-plain px-3 py-2 bg-panel"><span class="c">$</span> osint example.com <span class="acc">--enable subdomain_takeover --enable favicon_hash</span></pre>
+      </div>
+
+      <div class="box-plain p-6 bg-bg flex flex-col">
+        <div class="text-xs text-dim uppercase tracking-widest">recipe 03</div>
+        <div class="text-fg font-medium mt-1">Profile a username across the web</div>
+        <p class="text-sm text-dim mt-2 leading-relaxed flex-1">Sherlock + WhatsMyName + 1,008 sites. Discovery dorks. PGP key lookup. GitHub leak scan.</p>
+        <pre class="mt-5 text-[12px] sm:text-[13px] leading-snug box-plain px-3 py-2 bg-panel"><span class="c">$</span> osint <span class="acc">temur</span></pre>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═════ DISCLAIMER ═════ -->
+<section class="border-t border-line stripes">
+  <div class="max-w-6xl mx-auto px-5 sm:px-8 py-14">
+    <div class="flex flex-col md:flex-row md:items-center gap-5 md:gap-10">
+      <div class="text-warn text-2xl shrink-0">⚠</div>
+      <div class="flex-1">
+        <div class="text-fg font-medium">Authorised security testing only.</div>
+        <p class="text-sm text-dim mt-1.5 leading-relaxed max-w-3xl">
+          mytools-osint queries third-party APIs and probes hosts you specify. You are responsible for ensuring you have authorisation
+          to investigate every target you submit. Active modules (route_discover, port_scan, subdomain_takeover, favicon_hash) refuse
+          to run in <code class="text-accent">--opsec</code> mode unless you set a per-module override. Use with care.
+        </p>
+      </div>
+      <a href="https://github.com/Azizbek16l/mytools-osint" target="_blank" rel="noopener" class="flip border border-accent text-accent px-4 py-2.5 text-sm self-start md:self-auto inline-flex items-center gap-2 shrink-0">
+        ★ star on github →
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ═════ FOOTER ═════ -->
+<footer class="border-t border-line">
+  <div class="max-w-6xl mx-auto px-5 sm:px-8 py-10 grid sm:grid-cols-3 gap-8 text-sm">
+
+    <div>
+      <div class="flex items-center gap-2 text-fg font-bold mb-3">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#58A6FF" stroke-width="1.5">
+          <path d="M3 4h6v6H3zM15 4h6v6h-6zM3 14h6v6H3zM15 14h6v6h-6z"/>
+          <path d="M12 7v10M7 12h10" stroke="#58A6FF" stroke-width="1"/>
+        </svg>
+        mytools-osint
+      </div>
+      <p class="text-xs text-dim leading-relaxed">
+        Personal OSINT CLI. 45 modules. Free APIs only.<br>
+        Built by <a href="https://bluetm.uz" class="text-accent und" target="_blank" rel="noopener">Bluetm.uz</a>.
+      </p>
+    </div>
+
+    <div>
+      <div class="text-xs text-dim uppercase tracking-widest mb-3">project</div>
+      <ul class="space-y-2">
+        <li><a href="https://github.com/Azizbek16l/mytools-osint"             class="text-fg und"      target="_blank" rel="noopener">github →</a></li>
+        <li><a href="https://github.com/Azizbek16l/mytools-osint/releases"    class="text-fg und"      target="_blank" rel="noopener">releases</a></li>
+        <li><a href="https://github.com/Azizbek16l/mytools-osint/issues"      class="text-fg und"      target="_blank" rel="noopener">issues</a></li>
+        <li><a href="https://github.com/Azizbek16l/mytools-osint/blob/main/CHANGELOG.md" class="text-fg und" target="_blank" rel="noopener">changelog</a></li>
+      </ul>
+    </div>
+
+    <div>
+      <div class="text-xs text-dim uppercase tracking-widest mb-3">install via</div>
+      <ul class="space-y-2">
+        <li><a href="https://github.com/Azizbek16l/homebrew-osint" class="text-fg und" target="_blank" rel="noopener">brew tap</a></li>
+        <li><a href="https://github.com/Azizbek16l/scoop-bucket"   class="text-fg und" target="_blank" rel="noopener">scoop bucket</a></li>
+        <li><a href="https://github.com/microsoft/winget-pkgs/tree/master/manifests/a/Azizbek16l/mytools-osint" class="text-fg und" target="_blank" rel="noopener">winget</a></li>
+      </ul>
+    </div>
+
+  </div>
+  <div class="border-t border-line">
+    <div class="max-w-6xl mx-auto px-5 sm:px-8 py-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-dim">
+      <span>© 2026 Bluetm.uz · MIT License</span>
+      <span class="text-line">────────────────────────────────────</span>
+      <span class="cursor">made with mono and grit</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // -------- install tab switcher --------
+  const tabs  = document.querySelectorAll('[role="tab"]');
+  const panes = document.querySelectorAll('[data-pane]');
+  tabs.forEach(t => {
+    t.addEventListener('click', () => {
+      const k = t.dataset.tab;
+      tabs.forEach(x => x.setAttribute('aria-selected', x === t ? 'true' : 'false'));
+      panes.forEach(p => p.classList.toggle('hidden', p.dataset.pane !== k));
+    });
+  });
+
+  // -------- copy-to-clipboard for install rows --------
+  document.querySelectorAll('.install-row').forEach(row => {
+    row.classList.add(
+      'box-plain','bg-panel','px-4','py-4','text-[12.5px]','sm:text-[13.5px]',
+      'flex','items-center','gap-3','overflow-x-auto','cursor-pointer','select-none','group','relative'
+    );
+    const cmd = row.dataset.cmd;
+    const code = row.querySelector('code');
+    if (code) code.classList.add('text-fg','whitespace-nowrap','flex-1');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ml-auto shrink-0 flip border border-line px-2.5 py-1 text-[11px] text-dim';
+    btn.textContent = 'copy';
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(cmd);
+        const prev = btn.textContent;
+        btn.textContent = '✓ copied';
+        btn.classList.add('text-ok');
+        setTimeout(() => { btn.textContent = prev; btn.classList.remove('text-ok'); }, 1600);
+      } catch { btn.textContent = '!'; }
+    });
+    row.addEventListener('click', () => btn.click());
+    row.appendChild(btn);
+  });
+</script>
+</body>
+</html>

@@ -356,7 +356,7 @@ the user never has to leave their chat.
 
 Single-process Python. The `Runner` registers every module against the `QueryKind`s it handles. Each query fans out to the matching producers concurrently under a single asyncio semaphore (default 40). Each module **streams** `Hit`s as they arrive — the GUI/CLI shows positives the moment they land.
 
-See `CLAUDE.md` for the full architecture overview.
+Full reference at [cyber.bluetm.uz](https://cyber.bluetm.uz) (landing) and [cyber.bluetm.uz/docs](https://cyber.bluetm.uz/docs.html) (reference).
 
 ## Build from source
 
