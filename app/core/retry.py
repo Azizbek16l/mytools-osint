@@ -59,13 +59,26 @@ async def fetch_with_policy(
             )
             if r.status_code == 200:
                 return r, HitStatus.FOUND, ""
+            # Honor 429 Retry-After (capped) before treating it as terminal.
+            if r.status_code == 429 and attempt < p.attempts - 1:
+                ra = _retry_after_seconds(r)
+                await asyncio.sleep(min(ra if ra is not None else p.backoff_s * (attempt + 1), 30.0))
+                continue
             if r.status_code in p.retry_on and attempt < p.attempts - 1:
                 await asyncio.sleep(p.backoff_s * (attempt + 1))
                 continue
             return None, classify_http(r.status_code), f"HTTP {r.status_code}"
-        except BaseException as e:
+        except asyncio.CancelledError:
+            raise  # never swallow cancellation — keeps Ctrl-C / shutdown responsive
+        except Exception as e:
             last_status = classify_exception(e)
             last_detail = f"{type(e).__name__}: {e}"[:120]
             if attempt < p.attempts - 1:
                 await asyncio.sleep(p.backoff_s * (attempt + 1))
     return None, last_status, last_detail
+
+
+def _retry_after_seconds(r: httpx.Response) -> float | None:
+    """Parse a Retry-After header (delta-seconds form). None if absent/unparseable."""
+    raw = r.headers.get("retry-after", "").strip()
+    return float(raw) if raw.isdigit() else None

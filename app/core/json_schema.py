@@ -19,11 +19,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from app import __version__ as TOOL_VERSION  # single source of truth (was "0.1.0")
 from app.core.types import Hit, HitStatus, QueryResult, Severity
 
 JSON_SCHEMA_VERSION = "1.0"
 TOOL_NAME = "mytools-osint"
-TOOL_VERSION = "0.1.0"
 
 # Ranking used for stable sort. Higher = more important.
 _SEVERITY_RANK: dict[str, int] = {

@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import random
 import re
 import time
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -270,6 +272,13 @@ async def probe_site(
     )
 
 
+def _host_key(site: dict[str, Any]) -> str:
+    """Registrable-ish host for per-host throttling (last two labels)."""
+    host = (urlparse(site.get("url", "")).hostname or site.get("name", "")).lower()
+    parts = host.split(".")
+    return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+
 async def stream_probes(
     sites: list[dict[str, Any]],
     target: str,
@@ -278,12 +287,31 @@ async def stream_probes(
     concurrency: int = 30,
     timeout: float | None = None,
     retries: int = 0,
+    per_host: int = 4,
 ) -> AsyncIterator[Hit]:
-    """Run all site probes concurrently, yielding Hits as they finish."""
+    """Run all site probes concurrently, yielding Hits as they finish.
+
+    Two gates: a global cap (`concurrency`) and a per-host cap (`per_host`).
+    Without the per-host cap, bursting ~1000 probes fans dozens of parallel
+    hits at sites sharing a WAF/CDN, tripping burst detection → 403/429 storms.
+    """
     sem = asyncio.Semaphore(concurrency)
+    host_sems: dict[str, asyncio.Semaphore] = {}
+
+    def _host_sem(site: dict[str, Any]) -> asyncio.Semaphore:
+        key = _host_key(site)
+        s = host_sems.get(key)
+        if s is None:
+            s = asyncio.Semaphore(per_host)
+            host_sems[key] = s
+        return s
 
     async def one(site: dict[str, Any]) -> Hit:
-        async with sem:
+        # Spread the initial wave so 1000 probes don't all hit shared WAFs in the
+        # same instant (cheap burst desync; complements the per-host gate).
+        await asyncio.sleep(random.uniform(0, 0.12))
+        # Per-host gate first (queues same-host probes), then the global cap.
+        async with _host_sem(site), sem:
             return await probe_site(site, target, module, timeout=timeout, retries=retries)
 
     tasks = [asyncio.create_task(one(s)) for s in sites]

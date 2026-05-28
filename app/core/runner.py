@@ -7,6 +7,7 @@ is safe and Qt updates happen immediately.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from datetime import UTC, datetime
 
 from .config import settings
 from .types import Hit, HitStatus, Query, QueryKind, QueryResult, Severity
+
+logger = logging.getLogger("osint.runner")
 
 # A producer yields Hits as they arrive. The runner streams them up to the UI.
 HitProducer = Callable[[Query], AsyncIterator[Hit]]
@@ -72,7 +75,7 @@ class Runner:
                             try:
                                 await on_hit(hit)
                             except Exception:
-                                pass
+                                logger.debug("on_hit callback failed for %s", entry.name, exc_info=True)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -88,7 +91,7 @@ class Runner:
                     try:
                         await on_hit(err)
                     except Exception:
-                        pass
+                        logger.debug("on_hit callback failed for %s (error hit)", entry.name, exc_info=True)
 
         modules = self.modules_for(query.kind)
         if not modules:
@@ -101,11 +104,11 @@ class Runner:
         except* asyncio.CancelledError:
             # Cooperative cancel — siblings already torn down by TaskGroup.
             pass
-        except* Exception:
+        except* Exception as eg:
             # Module exceptions are already converted to ERROR Hits inside collect().
-            # Anything still surfacing here is unexpected — swallow to keep partial
-            # results usable rather than crash the whole query.
-            pass
+            # Anything still surfacing here is unexpected — keep partial results
+            # usable rather than crash, but log it instead of swallowing silently.
+            logger.warning("unexpected runner exceptions: %r", eg.exceptions)
 
         result.finished_at = datetime.now(UTC)
         result.duration_ms = int((time.perf_counter() - started) * 1000)

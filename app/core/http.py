@@ -108,6 +108,31 @@ def _ua() -> str:
         )
 
 
+def _default_headers() -> dict[str, str]:
+    """Realistic, internally-consistent browser headers.
+
+    A Chrome User-Agent with no client hints / Sec-Fetch is itself a strong bot
+    signal for Cloudflare/Akamai (a cause of the 403 storms). ua_generator emits
+    a matching sec-ch-ua trio for the generated UA. Accept-Encoding is left to
+    httpx (it advertises only what it can actually decode).
+    """
+    h = {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+        "Cache-Control": "no-cache",
+    }
+    try:
+        h.update(ua_generator.generate(device="desktop", browser="chrome").headers.get())
+    except Exception:
+        h["User-Agent"] = _ua()
+    return h
+
+
 class _CacheTransport(httpx.AsyncBaseTransport):
     """Wrap a base transport with the SQLite cache.
 
@@ -184,9 +209,11 @@ async def get_client() -> httpx.AsyncClient:
         if _client is not None and not _client.is_closed:
             return _client
         s = settings()
+        # Pool must comfortably exceed the sum of module concurrencies, else
+        # httpx queues requests and tail latency balloons.
         limits = httpx.Limits(
-            max_connections=max(64, s.http_concurrency * 2),
-            max_keepalive_connections=max(32, s.http_concurrency),
+            max_connections=max(128, s.http_concurrency * 4),
+            max_keepalive_connections=max(64, s.http_concurrency * 2),
         )
         timeout = httpx.Timeout(s.http_timeout_sec, connect=min(5.0, s.http_timeout_sec))
         transport = _build_transport()
@@ -195,12 +222,7 @@ async def get_client() -> httpx.AsyncClient:
             "limits": limits,
             "timeout": timeout,
             "follow_redirects": True,
-            "headers": {
-                "User-Agent": _ua(),
-                "Accept-Language": "en-US,en;q=0.9",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Cache-Control": "no-cache",
-            },
+            "headers": _default_headers(),
             "verify": True,
         }
         if transport is not None:

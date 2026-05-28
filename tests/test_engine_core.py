@@ -227,14 +227,6 @@ class TestRetry:
         assert resp is None
         assert status == HitStatus.ERROR  # 404 → our request shape
 
-    @pytest.mark.xfail(
-        reason="BUG: retry.fetch_with_policy catches BaseException (line 66), which "
-        "swallows asyncio.CancelledError and retries/returns it as a normal "
-        "UNAVAILABLE failure instead of re-raising. This breaks cooperative "
-        "cancellation/shutdown. Fix: `except asyncio.CancelledError: raise` "
-        "before the BaseException handler.",
-        strict=True,
-    )
     async def test_reraises_cancelled_error(self, monkeypatch) -> None:
         """CRITICAL: a cancel during fetch must propagate, never be swallowed as a
         normal failure. Swallowing CancelledError breaks cooperative shutdown."""
