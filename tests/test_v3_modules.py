@@ -41,6 +41,10 @@ def _patch_client(monkeypatch, handler):
 
 class TestGithubLeaks:
     def test_domain_search_hit(self, monkeypatch) -> None:
+        # code/commit search requires auth — provide a token so we exercise the
+        # real search path rather than the no-token SKIP.
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_faketoken")
+
         def handler(req):
             url = str(req.url)
             if "api.github.com/search/code" in url:

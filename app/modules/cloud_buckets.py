@@ -17,7 +17,6 @@ import asyncio
 import re
 from collections.abc import AsyncIterator
 
-from app.core.classify import classify_exception
 from app.core.http import get_client
 from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
@@ -84,18 +83,27 @@ def _classify_response(code: int, body: str, provider: str) -> tuple[HitStatus, 
 
 
 async def _probe(provider: str, url: str, name: str) -> Hit | None:
+    """Probe one (provider, bucket-name) pair.
+
+    Returns a Hit ONLY for an actionable finding (a bucket that EXISTS — FOUND).
+    Negatives (NOT_FOUND) and low-signal noise (UNCERTAIN 403-ambiguous / odd
+    status / transport error against a non-existent name) return None so the
+    caller can collapse them into a single summary row instead of emitting one
+    row per permutation (~360 probes per domain otherwise).
+    """
     try:
         client = await get_client()
         r = await client.get(url, timeout=_TIMEOUT,
                              follow_redirects=False)
         code = r.status_code
         body = r.text[:2000] if r.text else ""
-    except Exception as e:
-        return Hit(module=NAME, source=provider, category="cloud-leak",
-                   url=url, status=classify_exception(e),
-                   title=name, detail=f"{type(e).__name__}: {e}")
+    except Exception:
+        # A transport error against a *guessed* bucket name is just "name doesn't
+        # resolve / not reachable" — not actionable. Collapse into the summary.
+        return None
     status, sev, detail = _classify_response(code, body, provider)
-    if status == HitStatus.NOT_FOUND:
+    if status != HitStatus.FOUND:
+        # NOT_FOUND and UNCERTAIN are non-findings for a brute-force enumerator.
         return None
     return Hit(
         module=NAME, source=provider, category="cloud-leak",

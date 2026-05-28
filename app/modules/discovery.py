@@ -12,6 +12,7 @@ import os
 import urllib.parse
 from collections.abc import AsyncIterator
 
+from app.core.classify import classify_exception, classify_http
 from app.core.http import get_client
 from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
@@ -37,28 +38,40 @@ async def _wayback(target: str) -> AsyncIterator[Hit]:
     try:
         client = await get_client()
         r = await client.get(cdx, headers={"Accept": "application/json"}, timeout=20)
-        if r.status_code != 200:
-            yield Hit(module=NAME, source="Wayback", category="archive",
-                      status=HitStatus.UNCERTAIN, detail=f"HTTP {r.status_code}")
-            return
-        rows = r.json() or []
-        if len(rows) <= 1:
-            yield Hit(module=NAME, source="Wayback", category="archive",
-                      status=HitStatus.NOT_FOUND, detail="no archived snapshots")
-            return
-        for ts, original in rows[1:11]:
-            snap = f"https://web.archive.org/web/{ts}/{original}"
-            yield Hit(
-                module=NAME, source="Wayback", category="archive",
-                status=HitStatus.FOUND,
-                title=original,
-                detail=f"snapshot {ts}",
-                url=snap, severity=Severity.LOW,
-                extra={"timestamp": ts, "url": original},
-            )
     except Exception as e:
+        # Connect/read timeout to archive.org is transient, not our bug. Always
+        # carry a real detail (some httpx timeout exceptions str() to "").
         yield Hit(module=NAME, source="Wayback", category="archive",
-                  status=HitStatus.ERROR, detail=str(e))
+                  status=classify_exception(e), url=cdx, title=target,
+                  detail=f"{type(e).__name__}: {e}".rstrip(": "))
+        return
+    if r.status_code != 200:
+        yield Hit(module=NAME, source="Wayback", category="archive",
+                  status=classify_http(r.status_code), url=cdx, title=target,
+                  detail=f"HTTP {r.status_code}")
+        return
+    try:
+        rows = r.json() or []
+    except Exception:
+        yield Hit(module=NAME, source="Wayback", category="archive",
+                  status=HitStatus.NO_DATA, url=cdx, title=target,
+                  detail="empty or non-json CDX response")
+        return
+    if len(rows) <= 1:
+        yield Hit(module=NAME, source="Wayback", category="archive",
+                  status=HitStatus.NO_DATA, url=cdx, title=target,
+                  detail="no archived snapshots")
+        return
+    for ts, original in rows[1:11]:
+        snap = f"https://web.archive.org/web/{ts}/{original}"
+        yield Hit(
+            module=NAME, source="Wayback", category="archive",
+            status=HitStatus.FOUND,
+            title=original,
+            detail=f"snapshot {ts}",
+            url=snap, severity=Severity.LOW,
+            extra={"timestamp": ts, "url": original},
+        )
 
 
 async def _github_search(value: str, kind: QueryKind) -> AsyncIterator[Hit]:

@@ -225,7 +225,10 @@ class TestRetry:
 
         assert calls["n"] == 1, "4xx must not be retried"
         assert resp is None
-        assert status == HitStatus.ERROR  # 404 → our request shape
+        # 404 from an upstream source = "no record for this target", not a tool
+        # bug — classified NO_DATA (see classify_http). The no-retry behaviour
+        # (exactly one GET) is what this test guards and is unchanged.
+        assert status == HitStatus.NO_DATA
 
     async def test_reraises_cancelled_error(self, monkeypatch) -> None:
         """CRITICAL: a cancel during fetch must propagate, never be swallowed as a

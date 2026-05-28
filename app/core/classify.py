@@ -28,9 +28,19 @@ def classify_http(status_code: int) -> HitStatus:
     if status_code in _UPSTREAM_DOWN:
         return HitStatus.UNAVAILABLE
     if status_code in (401, 403):
-        return HitStatus.SKIPPED   # auth required / geofenced — not actionable
+        # auth required / geofenced / quota — the source is up, we just can't
+        # read it right now. UNAVAILABLE, not ERROR (it's not our bug).
+        return HitStatus.UNAVAILABLE
+    if status_code in (404, 410):
+        # third-party source has no record for this target → "no data", not a
+        # tool bug. (e.g. HackerTarget 404 for an unindexed domain.)
+        return HitStatus.NO_DATA
+    if status_code in (400, 422):
+        # malformed request shape (bad URL / unsupported params) — that's ours.
+        return HitStatus.ERROR
     if 400 <= status_code < 500:
-        return HitStatus.ERROR     # our request shape (bad URL / params)
+        # other 4xx (405/406/451/…) — upstream rejected us but isn't down.
+        return HitStatus.UNAVAILABLE
     return HitStatus.UNCERTAIN
 
 

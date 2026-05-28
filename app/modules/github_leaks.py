@@ -45,8 +45,13 @@ _COMMIT_SEARCH = "https://api.github.com/search/commits?q={q}&per_page=20"
 _TIMEOUT = 12.0
 
 
+def _token() -> str:
+    """GitHub PAT from env. Accept GITHUB_PAT or the common GITHUB_TOKEN alias."""
+    return (os.getenv("GITHUB_PAT", "") or os.getenv("GITHUB_TOKEN", "")).strip()
+
+
 def _headers() -> dict[str, str]:
-    pat = os.getenv("GITHUB_PAT", "").strip()
+    pat = _token()
     h = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
@@ -178,6 +183,14 @@ async def _search_users_for_email(email: str) -> AsyncIterator[Hit]:
 async def run(query: Query) -> AsyncIterator[Hit]:
     value = (query.value or "").strip().lower()
     if not value:
+        return
+    # GitHub's code/commit search API hard-requires authentication; without a
+    # token every endpoint 401/403/422s. Emit ONE concise SKIPPED hit instead
+    # of an error per endpoint.
+    if not _token():
+        yield Hit(module=NAME, source="github", category="leak",
+                  status=HitStatus.SKIPPED, title=value,
+                  detail="no GITHUB_TOKEN — skipped")
         return
     if query.kind == QueryKind.DOMAIN:
         async for h in _search_code_for_domain(value):

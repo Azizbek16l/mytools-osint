@@ -95,12 +95,15 @@ async def probe_site(
                 attempt += 1
                 await asyncio.sleep(0.3 * (2**attempt))
                 continue
+            # A connect/read timeout or DNS failure is transient/unreachable —
+            # the site is down or blocking us, not a bug in our code. Surface as
+            # UNAVAILABLE so it doesn't pollute the "errors" counter.
             return Hit(
                 module=module,
                 source=site["name"],
                 category=site.get("category", ""),
                 url=url,
-                status=HitStatus.ERROR,
+                status=HitStatus.UNAVAILABLE,
                 detail=f"{type(e).__name__}: {e}",
                 latency_ms=int((time.perf_counter() - started) * 1000),
             )
