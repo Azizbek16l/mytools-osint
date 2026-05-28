@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import codecs
 import re
 from collections.abc import AsyncIterator
 from urllib.parse import urljoin, urlparse
@@ -142,10 +141,12 @@ async def _favicon(domain: str) -> Hit:
                        else HitStatus.NO_DATA,
                    title=domain, detail=f"HTTP {r.status_code}, "
                                         f"{len(r.content or b'')} bytes")
-    b64 = codecs.encode(base64.b64encode(r.content), "ascii").decode("ascii")
-    # Shodan splits the base64 into 76-char lines (Python's old base64.encode).
-    chunked = "\n".join(b64[i:i + 76] for i in range(0, len(b64), 76)) + "\n"
-    h = _mmh3_x86_32(chunked.encode("ascii"))
+    # Shodan's favicon hash = mmh3 over base64.encodebytes() output (76-char
+    # lines + trailing newline). encodebytes returns exactly that, as bytes —
+    # which is what _mmh3_x86_32 expects. (The old codecs.encode(bytes,"ascii")
+    # raised TypeError: ascii_encode wants str, not bytes.)
+    chunked = base64.encodebytes(r.content)
+    h = _mmh3_x86_32(chunked)
     shodan_url = f"https://www.shodan.io/search?query=http.favicon.hash%3A{h}"
     return Hit(
         module=NAME, source="favicon", category="recon",

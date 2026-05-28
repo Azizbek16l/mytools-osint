@@ -79,7 +79,10 @@ async def probe_site(
             if timeout is not None:
                 req_kw["timeout"] = timeout
             if "data" in site:
-                req_kw["data"] = {k: v.replace("{}", target_for_url) for k, v in site["data"].items()}
+                req_kw["data"] = {
+                    k: (v.replace("{}", target_for_url) if isinstance(v, str) else v)
+                    for k, v in site["data"].items()
+                }
             if "json" in site:
                 req_kw["json"] = {
                     k: (v.replace("{}", target_for_url) if isinstance(v, str) else v)
