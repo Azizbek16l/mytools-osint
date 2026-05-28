@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import pytest
 
+from app.core.infer import infer_kind
 from app.core.types import QueryKind
 from app.modules.base import clean_email, clean_phone, clean_username
-from app.ui.main_window import infer_kind
 
 
 @pytest.mark.parametrize(
