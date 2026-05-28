@@ -11,6 +11,7 @@ OPSEC mode (env `OSINT_OPSEC=1`):
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import os
 import random
 from typing import Any
@@ -26,6 +27,75 @@ _lock = asyncio.Lock()
 
 def _opsec_on() -> bool:
     return os.getenv("OSINT_OPSEC", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _allow_private() -> bool:
+    """Opt-out for operators who legitimately scan internal ranges."""
+    return os.getenv("OSINT_ALLOW_PRIVATE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ip_is_internal(ip_str: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return (
+        ip.is_private or ip.is_loopback or ip.is_link_local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
+_resolve_cache: dict[str, bool] = {}
+
+
+async def _host_blocked(host: str | None) -> bool:
+    """SSRF guard: block private/loopback/link-local/metadata targets.
+
+    Covers the initial request AND every redirect hop (the guard sits in the
+    transport, which httpx invokes per hop). Bypass with OSINT_ALLOW_PRIVATE=1.
+    Under OPSEC we do NOT resolve hostnames locally (would leak DNS) — only
+    literal-IP internal targets are blocked there; the SOCKS proxy handles the
+    rest.
+    """
+    if not host or _allow_private():
+        return False
+    # Literal IP — check directly (also catches 169.254.169.254 metadata).
+    try:
+        ipaddress.ip_address(host)
+        return _ip_is_internal(host)
+    except ValueError:
+        pass
+    if _opsec_on():
+        return False  # don't leak DNS; proxy resolves the hostname
+    if host in _resolve_cache:
+        return _resolve_cache[host]
+    blocked = False
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(host, None)
+        blocked = any(_ip_is_internal(info[4][0]) for info in infos)
+    except Exception:
+        blocked = False
+    _resolve_cache[host] = blocked
+    return blocked
+
+
+class _SSRFGuardTransport(httpx.AsyncBaseTransport):
+    """Rejects requests (incl. redirect hops) to internal/metadata addresses."""
+
+    def __init__(self, inner: httpx.AsyncBaseTransport) -> None:
+        self._inner = inner
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if await _host_blocked(request.url.host):
+            raise httpx.ConnectError(
+                f"blocked internal/SSRF target: {request.url.host} "
+                "(set OSINT_ALLOW_PRIVATE=1 to allow)",
+                request=request,
+            )
+        return await self._inner.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
 
 
 def _ua() -> str:
@@ -96,11 +166,13 @@ def _build_transport() -> httpx.AsyncBaseTransport | None:
             os.environ["HTTP_PROXY"] = proxy
     # Wrap base with cache transport if OSINT_CACHE is on.
     from app.core import cache as _cache
+    if base is None:
+        base = httpx.AsyncHTTPTransport(http2=True)
     if _cache.is_enabled():
-        if base is None:
-            base = httpx.AsyncHTTPTransport(http2=True)
-        return _CacheTransport(base)
-    return base
+        base = _CacheTransport(base)
+    # SSRF guard is the outermost wrapper so it validates every request
+    # (including cache hits and redirect hops) before anything else.
+    return _SSRFGuardTransport(base)
 
 
 async def get_client() -> httpx.AsyncClient:

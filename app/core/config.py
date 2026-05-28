@@ -133,6 +133,12 @@ def load_settings(env_file: Path | str | None = None) -> Settings:
     )
     for d in (s.data_dir, s.telethon_dir, s.cache_dir, s.exports_dir):
         d.mkdir(parents=True, exist_ok=True)
+    # Telethon session files grant full Telegram-account access — keep the
+    # directory owner-only so the session secret isn't world-readable.
+    try:
+        os.chmod(s.telethon_dir, 0o700)
+    except OSError:
+        pass
     _settings = s
     return s
 

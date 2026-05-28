@@ -38,6 +38,20 @@ def _esc(s: object) -> str:
     return html.escape(str(s) if s is not None else "")
 
 
+def _safe_href(url: object) -> str:
+    """Return the URL only if it is http(s); else "".
+
+    html.escape() does NOT neutralise a `javascript:`/`data:` URI inside an
+    href, so scraped/attacker-controlled URLs must be scheme-checked before
+    being placed in an anchor (anti stored-XSS).
+    """
+    from urllib.parse import urlparse
+    try:
+        return str(url) if urlparse(str(url)).scheme in ("http", "https") else ""
+    except Exception:
+        return ""
+
+
 _ENTITY_COLORS = {
     "email":     "#7be67b",
     "domain":    "#83c5ff",
@@ -342,8 +356,13 @@ def render_report(query: Query, result: QueryResult, elapsed_ms: int,
                 extra_pre = (
                     f'<pre class="extra">{_esc(json.dumps(h.extra, indent=2, default=str)[:4000])}</pre>'
                 )
-            url_html = (f'<a href="{_esc(h.url)}" target="_blank" rel="noreferrer">'
-                        f'{_esc(h.url)[:70]}</a>') if h.url else ""
+            _safe = _safe_href(h.url)
+            if _safe:
+                url_html = (f'<a href="{_esc(_safe)}" target="_blank" rel="noreferrer">'
+                            f'{_esc(h.url)[:70]}</a>')
+            else:
+                # non-http(s) scheme: show as plain escaped text, never a link
+                url_html = _esc(h.url)[:70] if h.url else ""
             rows.append(
                 f'<tr class="status-{_esc(h.status.value)}">'
                 f'<td class="sev-cell" style="border-left:3px solid {c}">'

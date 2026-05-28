@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 import urllib.parse
 from datetime import UTC, datetime
 
@@ -24,6 +25,10 @@ from app.core.runner import runner
 from app.core.types import Hit, Query, QueryKind
 
 _BIND = "127.0.0.1"
+# Per-run secret embedded in the page and required on /api/scan. Stops other
+# local web pages (or DNS-rebinding) from silently driving scans.
+_TOKEN = ""
+_PORT = 8765
 
 
 _HTML = r"""<!doctype html>
@@ -118,19 +123,36 @@ _HTML = r"""<!doctype html>
 const $ = (id) => document.getElementById(id);
 let evt = null, n = 0, p = 0, c = 0, t0 = 0, timer = null;
 function fmt(d){ return (d ?? '').toString().slice(0, 240); }
+// Only allow http(s) links; reject javascript:/data: etc. (anti-XSS).
+function safeUrl(u){ try { const x = new URL(u); return (x.protocol === 'http:' || x.protocol === 'https:') ? x.href : null; } catch { return null; } }
+function cell(cls, text){ const td = document.createElement('td'); if (cls) td.className = cls; td.textContent = fmt(text); return td; }
 function row(h){
   n++;
   if (h.status === 'found') p++;
   if (h.severity === 'critical') c++;
   $('n').textContent = n; $('p').textContent = p; $('c').textContent = c;
   const tr = document.createElement('tr');
-  tr.className = 'status-' + h.status;
-  tr.innerHTML = `
-    <td class="sev"><span class="pill ${h.severity}">${h.severity}</span></td>
-    <td class="status">${h.status}</td>
-    <td class="src"><b>${fmt(h.source)}</b><br><span class="cat">${fmt(h.category) || '-'}</span></td>
-    <td><span class="det">${fmt(h.detail)}</span><br>${h.url ? `<span class="url"><a href="${h.url}" target="_blank" rel="noreferrer">${fmt(h.url)}</a></span>` : ''}</td>
-    <td class="lat">${h.latency_ms}ms</td>`;
+  tr.className = 'status-' + (h.status || '');
+  const sevTd = document.createElement('td'); sevTd.className = 'sev';
+  const pill = document.createElement('span'); pill.className = 'pill ' + (h.severity || ''); pill.textContent = h.severity || '';
+  sevTd.appendChild(pill); tr.appendChild(sevTd);
+  tr.appendChild(cell('status', h.status));
+  const srcTd = document.createElement('td'); srcTd.className = 'src';
+  const b = document.createElement('b'); b.textContent = fmt(h.source); srcTd.appendChild(b);
+  srcTd.appendChild(document.createElement('br'));
+  const cat = document.createElement('span'); cat.className = 'cat'; cat.textContent = fmt(h.category) || '-'; srcTd.appendChild(cat);
+  tr.appendChild(srcTd);
+  const findTd = document.createElement('td');
+  const det = document.createElement('span'); det.className = 'det'; det.textContent = fmt(h.detail); findTd.appendChild(det);
+  const su = safeUrl(h.url);
+  if (su) {
+    findTd.appendChild(document.createElement('br'));
+    const sp = document.createElement('span'); sp.className = 'url';
+    const a = document.createElement('a'); a.href = su; a.target = '_blank'; a.rel = 'noreferrer'; a.textContent = fmt(su);
+    sp.appendChild(a); findTd.appendChild(sp);
+  }
+  tr.appendChild(findTd);
+  tr.appendChild(cell('lat', (h.latency_ms ?? '') + 'ms'));
   $('rows').prepend(tr);
 }
 function stop(){
@@ -151,7 +173,7 @@ $('f').addEventListener('submit', (e) => {
   const q = encodeURIComponent($('q').value);
   const k = encodeURIComponent($('kind').value);
   const pf = encodeURIComponent($('profile').value);
-  evt = new EventSource(`/api/scan?q=${q}&kind=${k}&profile=${pf}`);
+  evt = new EventSource(`/api/scan?q=${q}&kind=${k}&profile=${pf}&token=__TOKEN__`);
   evt.addEventListener('hit', (e) => { try { row(JSON.parse(e.data)); } catch {} });
   evt.addEventListener('done', stop);
   evt.onerror = stop;
@@ -182,6 +204,9 @@ def _hit_event(h: Hit, q: Query) -> bytes:
 
 async def _handle_scan(qs: dict[str, str], writer: asyncio.StreamWriter) -> None:
     from cli import infer_kind  # local import — cli.py adds repo root to sys.path
+    if not secrets.compare_digest(qs.get("token", ""), _TOKEN):
+        writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 13\r\n\r\nbad token")
+        await writer.drain(); return
     q_value = qs.get("q", "").strip()
     if not q_value:
         writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 17\r\n\r\nmissing ?q=")
@@ -223,7 +248,7 @@ async def _handle_scan(qs: dict[str, str], writer: asyncio.StreamWriter) -> None
 
 
 async def _handle_index(writer: asyncio.StreamWriter) -> None:
-    body = _HTML.encode("utf-8")
+    body = _HTML.replace("__TOKEN__", _TOKEN).encode("utf-8")
     writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
                  b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n")
     writer.write(body)
@@ -238,15 +263,25 @@ async def _handle_404(writer: asyncio.StreamWriter) -> None:
 async def _serve_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     try:
         req_line = await asyncio.wait_for(reader.readline(), timeout=10)
-        # Drain headers
+        # Read headers, capturing Host for an anti-DNS-rebinding check.
+        host_hdr = ""
         while True:
             line = await asyncio.wait_for(reader.readline(), timeout=5)
             if line in (b"\r\n", b"\n", b""):
                 break
+            name, _, value = line.decode("latin-1").partition(":")
+            if name.strip().lower() == "host":
+                host_hdr = value.strip().lower()
         method, _, rest = req_line.decode("latin-1").strip().partition(" ")
         path, _, _ = rest.partition(" ")
         if method != "GET":
             writer.write(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n")
+            await writer.drain()
+            return
+        # Only accept loopback Host values — a rebinding/foreign Host is rejected.
+        allowed_hosts = {f"127.0.0.1:{_PORT}", f"localhost:{_PORT}", "127.0.0.1", "localhost"}
+        if host_hdr and host_hdr not in allowed_hosts:
+            writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 9\r\n\r\nbad host")
             await writer.drain()
             return
         url = urllib.parse.urlparse(path)
@@ -278,6 +313,9 @@ async def _run_server(port: int) -> None:
 
 
 def serve(port: int = 8765) -> int:
+    global _TOKEN, _PORT
+    _TOKEN = secrets.token_urlsafe(24)
+    _PORT = port
     load_settings()
     runner()  # warm registry
     try:

@@ -100,6 +100,12 @@ def _write_kv(kv: dict[str, str]) -> Path:
         for k in extras:
             lines.append(f"{k}={kv[k]}")
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Config holds API keys/tokens — keep it owner-only (not world-readable).
+    try:
+        os.chmod(p, 0o600)
+        os.chmod(p.parent, 0o700)
+    except OSError:
+        pass
     return p
 
 
