@@ -39,7 +39,12 @@ jobs:
       - name: Build CLI (Nuitka onefile)
         run: python scripts/build_cli.py
 
+      # GUI build (PySide6+Nuitka) is heavy and has hung the release before,
+      # blocking the CLI binary upload. Time-bound it and let it fail soft —
+      # the CLI binary (what brew/pipx ship) must always make it to the release.
       - name: Build GUI (Nuitka onefile)
+        continue-on-error: true
+        timeout-minutes: 25
         run: python scripts/build_exe.py
 
       - name: Package
@@ -47,7 +52,8 @@ jobs:
         run: |
           mkdir -p out
           cp dist/osint${{ matrix.ext }}        out/osint-${{ matrix.target }}${{ matrix.ext }}
-          cp dist/mytools-osint${{ matrix.ext }} out/mytools-osint-${{ matrix.target }}${{ matrix.ext }}
+          # GUI binary is optional — include it only if the (soft) GUI build produced it.
+          cp dist/mytools-osint${{ matrix.ext }} out/mytools-osint-${{ matrix.target }}${{ matrix.ext }} 2>/dev/null || echo "GUI binary skipped (build soft-failed)"
           cd out && shasum -a 256 * > SHA256SUMS
 
       - uses: actions/upload-artifact@v4
