@@ -871,6 +871,19 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
         v = (buf_text or "").strip()
         # Right-side: session state pill. Built once per refresh.
         state_bits: list[tuple[str, str]] = []
+        # Wave B — surface live agent progress when the loop is running.
+        try:
+            from app.features.agent import AGENT_STATE  # local import: opt-in
+            if AGENT_STATE.get("running"):
+                tok = int(AGENT_STATE.get("tokens", 0) or 0)
+                tok_str = f"{tok / 1000:.1f}k" if tok >= 1000 else str(tok)
+                state_bits.append((
+                    "fg:#a371f7 bold",
+                    f"  [agent {AGENT_STATE.get('step', 0)}/"
+                    f"{AGENT_STATE.get('max_steps', 0)} steps · {tok_str} tok]",
+                ))
+        except Exception:
+            pass
         if _CHAT_STATE.get("profile"):
             state_bits.append(("fg:#58a6ff bold", f"  profile:{_CHAT_STATE['profile']}"))
         if _CHAT_STATE.get("opsec"):
@@ -1009,6 +1022,9 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
         if action.action == "export":
             await _slash_export(db, action.arg)
             return await action_lookup(db)
+        if action.action == "agent":
+            await _slash_agent(action.arg)
+            return await action_lookup(db)
         # unknown — print the dispatcher's did-you-mean hint and loop
         if action.message:
             console.print(f"[{tokens.WARN}]{action.message}[/]")
@@ -1047,6 +1063,8 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
     _CHAT_STATE["last_query"] = query
     _CHAT_STATE["last_hits"] = list(hits)
     _CHAT_STATE["last_elapsed_ms"] = elapsed_ms
+    # Wave B — remember the raw input so `/agent` (no arg) can target it.
+    _CHAT_STATE["last_target"] = value
     # Quick footer cue so users discover the slash commands.
     console.print(
         f"   [{tokens.DIM}]/export html · md · json  ·  /graph show {kind.value} {value}  ·  type a new target to continue[/]"
@@ -1762,6 +1780,8 @@ _CHAT_STATE: dict[str, object] = {
     "last_elapsed_ms": 0,
     # Wave A — the externalised pattern the next /explain should use.
     "pattern": "exec-summary",
+    # Wave B — remember last typed target so `/agent` (no arg) can default to it
+    "last_target": "",
 }
 
 
@@ -1858,6 +1878,69 @@ def _slash_pattern(arg: str) -> None:
         f"   [{tokens.OK}]✓ pattern set →[/] [{tokens.ACCENT}]{a}[/] "
         f"[{tokens.DIM}]· used by /explain[/]",
     )
+
+
+async def _slash_agent(arg: str) -> None:
+    """`/agent [target]` — run the Wave B ReAct loop in the chat shell.
+
+    With no arg, falls back to the last typed value (which is usually the most
+    recent scan target). The loop is auto-approved here — the toolbar shows
+    progress; the analyst can Ctrl-C to cancel.
+    """
+    target = (arg or "").strip() or str(_CHAT_STATE.get("last_target") or "")
+    if not target:
+        console.print(
+            f"   [{tokens.WARN}]/agent: no target — type one first, or `/agent <target>`[/]",
+        )
+        return
+    from app.features.agent import AgentLoop
+    from app.features.ai import NoneProvider, select_provider
+
+    if isinstance(select_provider(), NoneProvider):
+        console.print(
+            f"   [{tokens.WARN}]no LLM available — run `osint doctor` for setup hints[/]",
+        )
+        return
+
+    # Reuse the same kind-inference the lookup prompt uses.
+    kind = _auto_kind(target)
+    if kind is None:
+        console.print(
+            f"   [{tokens.WARN}]ambiguous target {target!r} — type it through the prompt first[/]",
+        )
+        return
+    query = Query(kind=kind, value=target)
+
+    def _stream(step_kind: str, text: str, n_tok: int) -> None:
+        badge = {
+            "plan":        "[bold]plan[/]       ",
+            "thought":     "thought    ",
+            "action":      "action     ",
+            "observation": "observation",
+            "answer":      "[bold]answer[/]     ",
+            "error":       f"[{tokens.BAD}]error[/]      ",
+        }.get(step_kind, step_kind)
+        snippet = text.strip().splitlines()[0] if text.strip() else ""
+        if len(snippet) > 160:
+            snippet = snippet[:157] + "…"
+        suffix = f"  [{tokens.DIM}]{n_tok}t[/]" if n_tok else ""
+        console.print(f"   [{tokens.DIM}]·[/] {badge}  {snippet}{suffix}")
+
+    loop = AgentLoop()
+    try:
+        result = await loop.run(
+            query, max_steps=8, max_tokens=4000, on_step=_stream,
+        )
+    except asyncio.CancelledError:
+        console.print(f"   [{tokens.WARN}]agent cancelled[/]")
+        raise
+    console.print(
+        f"   [{tokens.DIM}]status={result.status} · steps={len(result.steps)} · "
+        f"tokens={result.tokens['in']}/{result.tokens['out']} · "
+        f"{result.elapsed_ms}ms[/]",
+    )
+    if result.status == "done" and result.answer:
+        console.print(f"   [{tokens.OK}]✓ {result.answer}[/]")
 
 
 async def _slash_export(db: Database, arg: str) -> None:

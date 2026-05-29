@@ -1037,6 +1037,10 @@ def main(argv: list[str] | None = None) -> int:
             "  prints OS / RAM / Python, Ollama reachability + installed models,\n"
             "  Claude key state, active provider, config dir perms, and a quick\n"
             "  network probe. Exit codes: 0 ok, 1 warnings, 2 errors."),
+        "agent": ("local ReAct agent loop (opt-in, default OFF)",
+            "usage: osint agent <target> [--no-approve]\n"
+            "  Bounded ReAct loop (max 8 steps, 4000 tokens) using the active\n"
+            "  LLM provider. Prompts for plan approval unless --no-approve."),
     }
     if raw and raw[0] in _SUB_HELP and len(raw) > 1 and raw[1] in ("-h", "--help"):
         summary, body = _SUB_HELP[raw[0]]
@@ -1082,6 +1086,9 @@ def main(argv: list[str] | None = None) -> int:
     if raw and raw[0] == "ai":
         from app.features.ai import cmd_ai
         return cmd_ai(raw[1:])
+    if raw and raw[0] == "agent":
+        from app.features.agent import cmd_agent
+        return cmd_agent(raw[1:])
     if raw and raw[0] == "doctor":
         from app.features.doctor import cmd_doctor
         return cmd_doctor(raw[1:])
