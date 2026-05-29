@@ -50,6 +50,13 @@ _DOMAIN_RE = re.compile(
 )
 # md5 = 32, sha1 = 40, sha256 = 64, sha512 = 128. Must be all hex.
 _HASH_RE = re.compile(r"^[a-fA-F0-9]+$")
+# Wave C — wallet / image surface
+_BTC_BASE58_RE = re.compile(r"^[13][1-9A-HJ-NP-Za-km-z]{25,34}$")
+_BTC_BECH32_RE = re.compile(r"^bc1[0-9ac-hj-np-z]{6,87}$", re.IGNORECASE)
+_ETH_ADDR_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
+_IMG_URL_RE = re.compile(r"^https?://\S+\.(?:jpg|jpeg|png|webp|heic|tiff?)(?:\?.*)?$",
+                         re.IGNORECASE)
+_IMG_EXTS_CLI = (".jpg", ".jpeg", ".png", ".webp", ".heic", ".tif", ".tiff")
 
 
 def infer_kind(value: str) -> QueryKind:
@@ -64,6 +71,15 @@ def infer_kind(value: str) -> QueryKind:
         pass
     if _EMAIL_RE.match(v):
         return QueryKind.EMAIL
+    # Wave C — wallet / image: anchored regexes so we don't blast USERNAME probes
+    # at a 0x… ETH address. ETH check first (cheapest); hash check stays AFTER
+    # so a hex 40-char string remains a hash unless prefixed with "0x".
+    if _ETH_ADDR_RE.match(v) or _BTC_BECH32_RE.match(v) or _BTC_BASE58_RE.match(v):
+        return QueryKind.WALLET
+    if _IMG_URL_RE.match(v) or (
+        v.lower().endswith(_IMG_EXTS_CLI) and (os.path.isabs(v) or re.match(r"^[A-Za-z]:[\\/]", v))
+    ):
+        return QueryKind.IMAGE
     # Hash detection — before phone (a 32-digit hex could look like digits).
     if _HASH_RE.match(v) and len(v) in (32, 40, 64, 128):
         return QueryKind.HASH

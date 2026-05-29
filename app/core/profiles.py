@@ -18,6 +18,8 @@ _TIER_A = {
     "domain", "asn_bgp", "ssl_tls", "http_headers",
     "tech_fingerprint", "threat_intel", "tor_check", "pgp_keys",
     "well_known", "web_hardening",
+    # Wave C — wallet/image: single-target, fast, always informative
+    "wallet", "image",
 }
 
 # Anything that takes longer or generates many rows.
@@ -32,6 +34,8 @@ _TIER_B = {
     # (favicon_hash, subdomain_takeover). All free-API, low noise per call.
     "favicon_hash", "wayback_urls", "certspotter", "ripestat",
     "hackertarget", "subdomain_takeover",
+    # Wave C — paid-quota-sensitive (dorks) + slower (leaks, business)
+    "dorks", "leaks", "business",
 }
 
 
@@ -48,6 +52,8 @@ PROFILES: dict[str, set[str]] = {
     "person": {
         "username", "email", "email_extras", "phone", "telegram",
         "whatsapp", "patterns", "pgp_keys", "discovery", "github_leaks",
+        # Wave C — person dossier
+        "dorks", "leaks", "business",
     },
     "domain-recon": {
         "domain", "ssl_tls", "http_headers", "tech_fingerprint",
@@ -56,6 +62,8 @@ PROFILES: dict[str, set[str]] = {
         "web_hardening", "subdomain_brute",
         # v4.2 passive sources
         "certspotter", "wayback_urls", "ripestat", "hackertarget",
+        # Wave C — domain-targeted dorks
+        "dorks",
     },
     "red-team": {
         "domain", "ssl_tls", "http_headers", "tech_fingerprint",
@@ -70,6 +78,13 @@ PROFILES: dict[str, set[str]] = {
         # v4.2 active + passive recon
         "favicon_hash", "wayback_urls", "certspotter", "ripestat",
         "hackertarget", "subdomain_takeover",
+        # Wave C — leak monitoring + dorking are core to red-team
+        "leaks", "dorks",
+    },
+    "dossier": {
+        # Wave C — full person+company background check
+        "username", "email", "email_extras", "phone", "patterns",
+        "github_leaks", "discovery", "leaks", "business", "dorks",
     },
     "active-recon": {
         # v4.1 — just the active (loud) probes for a focused offensive scan

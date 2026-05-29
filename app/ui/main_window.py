@@ -83,6 +83,10 @@ class MainWindow(QMainWindow):
         self.kind_box.addItem("Telegram", QueryKind.TELEGRAM.value)
         self.kind_box.addItem("WhatsApp", QueryKind.WHATSAPP.value)
         self.kind_box.addItem("IP/Domain", QueryKind.IP.value)
+        # Wave C — new kinds. Wallet/Image are auto-detected; Company is manual.
+        self.kind_box.addItem("Wallet (BTC/ETH)", QueryKind.WALLET.value)
+        self.kind_box.addItem("Image (URL/path)", QueryKind.IMAGE.value)
+        self.kind_box.addItem("Company name", QueryKind.COMPANY.value)
         tb.addWidget(self.kind_box)
 
         self.query_edit = QLineEdit()

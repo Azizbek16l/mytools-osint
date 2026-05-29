@@ -8,10 +8,12 @@ from app.core.runner import Runner
 
 from . import adjacency as _adjacency
 from . import asn_bgp as _asn_bgp
+from . import business as _business
 from . import certspotter as _certspotter
 from . import cloud_buckets as _cloud_buckets
 from . import discovery as _discovery
 from . import domain as _domain
+from . import dorks as _dorks
 from . import email as _email
 from . import email_extras as _email_extras
 from . import email_security as _email_security
@@ -20,9 +22,11 @@ from . import github_leaks as _github_leaks
 from . import hackertarget as _hackertarget
 from . import hibp_passwords as _hibp_passwords
 from . import http_headers as _http_headers
+from . import image as _image
 from . import internetdb as _internetdb
 from . import ip as _ip
 from . import ip_extras as _ip_extras
+from . import leaks as _leaks
 from . import malware_bazaar as _malware_bazaar
 from . import passive_dns as _passive_dns
 from . import patterns as _patterns
@@ -43,6 +47,7 @@ from . import tor_check as _tor_check
 from . import typosquat as _typosquat
 from . import username as _username
 from . import waf_cms_graphql as _waf_cms_graphql
+from . import wallet as _wallet
 from . import wayback_urls as _wayback_urls
 from . import web_hardening as _web_hardening
 from . import web_recon as _web_recon
@@ -66,6 +71,8 @@ MODULES = [
     # v4.2 — free passive sources + favicon pivot + subdomain takeover
     _favicon_hash, _wayback_urls, _certspotter, _ripestat, _hackertarget,
     _subdomain_takeover,
+    # Wave C — new data kinds (alphabetical)
+    _business, _dorks, _image, _leaks, _wallet,
 ]
 
 

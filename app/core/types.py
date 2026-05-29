@@ -18,6 +18,10 @@ class QueryKind(StrEnum):
     DOMAIN = "domain"
     PASSWORD = "password"   # noqa: S105 — kind identifier, not a password value
     HASH = "hash"           # md5/sha1/sha256 for malware / IOC lookups
+    # Wave C — new data kinds
+    WALLET = "wallet"       # BTC base58 / bech32 / ETH 0x address
+    IMAGE = "image"         # http(s) url or filesystem path to an image
+    COMPANY = "company"     # free-text legal entity name (no auto-detect)
 
 
 class HitStatus(StrEnum):
