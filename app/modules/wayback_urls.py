@@ -14,7 +14,6 @@ Endpoint: https://web.archive.org/cdx/search/cdx
 """
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator
 from urllib.parse import quote, urlsplit
 

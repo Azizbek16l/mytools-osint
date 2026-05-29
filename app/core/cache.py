@@ -211,7 +211,6 @@ def cmd_cache(argv: list[str]) -> int:
             print(f"    path:    {s['path']}")
             print(f"    entries: {s['entries']:,}  ({s['expired']:,} expired)")
             print(f"    size:    {mb:.1f} MiB")
-            import os
             print(f"    enabled: {'yes' if is_enabled() else 'no (set OSINT_CACHE=1)'}")
             return 0
         if sub == "clear":

@@ -261,6 +261,56 @@ pipx install mytools-osint
 docker run --rm ghcr.io/azizbek16l/osint:latest temur
 ```
 
+### Local LLM (Ollama)
+
+`osint ai explain` and `osint ai query` work with either a **local** model
+(Ollama, free, OPSEC-safe) or **Anthropic Claude** (cloud, paid). The tool
+runs on your laptop — local is the default and stays the default.
+
+```bash
+# 1. install Ollama (macOS: brew install ollama; Linux: curl install script)
+ollama serve &                # daemon on http://localhost:11434
+
+# 2. pull a model sized to your RAM (see `osint doctor` for advice):
+ollama pull qwen2.5:3b        # ~2GB Q4 — 8GB RAM laptops
+ollama pull llama3.1:8b       # ~5GB Q4 — 16GB+ RAM
+
+# 3. (optional) override the active model
+export OSINT_AI_MODEL=qwen2.5:3b
+```
+
+If no provider is available the AI subcommands degrade with a friendly hint —
+no crash, no missing-module surprise. Under `--opsec` Claude is automatically
+disabled (queries would leave the host); only Ollama is used.
+
+`OSINT_AI_PROVIDER=ollama|claude|none` forces a specific provider.
+
+### `osint doctor` — environment sanity check
+
+```bash
+osint doctor
+```
+
+Prints OS / arch / Python / RAM, whether Ollama is reachable and which models
+are installed, your Claude key state, the active provider, config + cache
+sizes, and a quick reachability probe against `crt.sh`. Exit codes: `0` all
+green, `1` warnings, `2` errors. Use it any time `ai explain` says it's
+unavailable.
+
+### Report patterns (Fabric-style)
+
+Patterns are plain Markdown files with `# IDENTITY`, `# STEPS`, `# OUTPUT`
+sections. Three ship in the box: `exec-summary`, `phishing-triage`, `dossier`.
+
+```bash
+osint ai patterns list
+osint ai explain domain acme.com --pattern phishing-triage
+```
+
+User patterns live at `~/.config/mytools-osint/patterns/`; a same-named file
+there overrides the built-in. No template engine — `{{PAYLOAD}}` substitution
+is intentionally tiny.
+
 ## Quick start
 
 ```bash

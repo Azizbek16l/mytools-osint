@@ -23,8 +23,7 @@ from pathlib import Path
 
 from app.core.config import load_settings, settings
 from app.core.db import Database
-from app.core.entities import EntityType, canonical_key, entity_id
-
+from app.core.entities import EntityType, entity_id
 
 # ---------------- BFS over the graph ----------------------------------
 
@@ -272,13 +271,10 @@ def cmd_graph(argv: list[str]) -> int:
                 payload: str
                 if fmt in ("cyto", "cytoscape", "json"):
                     payload = to_cytoscape_json(entities, edges)
-                    default_ext = ".cyto.json"
                 elif fmt == "gexf":
                     payload = to_gexf(entities, edges)
-                    default_ext = ".gexf"
                 elif fmt in ("graphml", "xml"):
                     payload = to_graphml(entities, edges)
-                    default_ext = ".graphml"
                 else:
                     print(f"unknown format {fmt!r}; valid: gexf, graphml, cytoscape",
                           file=sys.stderr); return 2

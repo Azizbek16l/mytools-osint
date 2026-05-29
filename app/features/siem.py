@@ -162,7 +162,7 @@ async def _push_misp(events: list[dict], misp_url: str | None = None,
     # Pick attribute type per OSINT severity / category. MISP categories:
     #   Network activity, External analysis, Other
     def attrib(ev: dict) -> dict | None:
-        cat = ev.get("category", "")
+        ev.get("category", "")
         url_val = ev.get("url") or ""
         val_map = [
             ("ip-src", lambda e: e.get("title") if (e.get("kind") == "ip") else None),

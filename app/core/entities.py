@@ -209,7 +209,7 @@ def canonical_key(etype: EntityType, value: str) -> str:
 def entity_id(etype: EntityType, value: str) -> str:
     """Stable short id (sha1 first 16 hex). Used as DB primary key."""
     key = canonical_key(etype, value)
-    return hashlib.sha1(f"{etype.value}:{key}".encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha1(f"{etype.value}:{key}".encode()).hexdigest()[:16]
 
 
 # ---- Dataclasses ---------------------------------------------------------

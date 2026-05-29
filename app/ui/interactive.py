@@ -960,6 +960,7 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
             # See above — cmd_wizard internally calls asyncio.run, so we
             # off-load it to a worker thread to avoid loop nesting.
             import asyncio as _asyncio
+
             from app.ui.config_cli import cmd_wizard
             try:
                 await _asyncio.to_thread(cmd_wizard)
@@ -1001,6 +1002,9 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
             return await action_lookup(db)
         if action.action == "explain":
             _slash_explain_toggle()
+            return await action_lookup(db)
+        if action.action == "pattern":
+            _slash_pattern(action.arg)
             return await action_lookup(db)
         if action.action == "export":
             await _slash_export(db, action.arg)
@@ -1756,6 +1760,8 @@ _CHAT_STATE: dict[str, object] = {
     "last_query": None,       # Query | None — used by /export
     "last_hits":  None,       # list[Hit] | None
     "last_elapsed_ms": 0,
+    # Wave A — the externalised pattern the next /explain should use.
+    "pattern": "exec-summary",
 }
 
 
@@ -1818,12 +1824,43 @@ def _slash_explain_toggle() -> None:
     state = "ON" if _CHAT_STATE["explain"] else "OFF"
     console.print(f"   [{tokens.ACCENT}]🤖 AI explain → {state}[/]")
     if _CHAT_STATE["explain"]:
-        import os
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            console.print(f"   [{tokens.WARN}]ANTHROPIC_API_KEY not set — explain will skip[/]")
+        # We don't hard-fail here — `osint ai` resolves the provider, which
+        # might be local Ollama instead of Claude. Just nudge if neither is
+        # configured.
+        from app.features.ai import NoneProvider, select_provider
+        if isinstance(select_provider(), NoneProvider):
+            console.print(
+                f"   [{tokens.WARN}]no LLM available — "
+                f"run `osint doctor` for setup hints[/]",
+            )
 
 
-async def _slash_export(db: "Database", arg: str) -> None:
+def _slash_pattern(arg: str) -> None:
+    """`/pattern [name|list]` — choose the explain pattern (Fabric-style)."""
+    from app.features.patterns import list_patterns, load_pattern
+    a = (arg or "").strip().lower()
+    if not a or a == "list":
+        names = list_patterns()
+        cur = _CHAT_STATE.get("pattern") or "(default)"
+        console.print(f"   [{tokens.DIM}]current pattern:[/] [{tokens.ACCENT}]{cur}[/]")
+        if names:
+            console.print(f"   [{tokens.DIM}]available:[/]")
+            for n in names:
+                console.print(f"     [{tokens.FG}]{n}[/]")
+        return
+    try:
+        load_pattern(a)
+    except FileNotFoundError as e:
+        console.print(f"   [{tokens.BAD}]{e}[/]")
+        return
+    _CHAT_STATE["pattern"] = a
+    console.print(
+        f"   [{tokens.OK}]✓ pattern set →[/] [{tokens.ACCENT}]{a}[/] "
+        f"[{tokens.DIM}]· used by /explain[/]",
+    )
+
+
+async def _slash_export(db: Database, arg: str) -> None:
     """`/export <html|md|json|jsonl> [PATH]` — re-render the last scan."""
     a = (arg or "html").strip().split()
     fmt = (a[0] if a else "html").lower()
@@ -1833,8 +1870,8 @@ async def _slash_export(db: "Database", arg: str) -> None:
     if q is None or hits is None:
         console.print(f"   [{tokens.WARN}]no scan to export yet — run one first[/]")
         return
-    from datetime import datetime
     import json as _json
+    from datetime import datetime
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     if fmt == "html":
         from app.ui.html_report import render as render_html
@@ -1863,7 +1900,7 @@ async def _slash_export(db: "Database", arg: str) -> None:
 
 async def _action_theme_picker() -> None:
     """v4.2 theme switcher — pick from 7 palettes, persist to ~/.config."""
-    from app.ui.tokens import THEMES, ACTIVE, persist_theme
+    from app.ui.tokens import ACTIVE, THEMES, persist_theme
     current_name = next(
         (k for k, v in THEMES.items()
          if v.ACCENT == ACTIVE.ACCENT and v.BG_HINT == ACTIVE.BG_HINT),
@@ -2062,6 +2099,7 @@ async def run_interactive(show_figlet: bool = False, classic: bool = False) -> i
                     await action_stats()
                 elif choice == "settings":
                     import asyncio as _asyncio
+
                     from app.ui.config_cli import cmd_wizard
                     try:
                         await _asyncio.to_thread(cmd_wizard)

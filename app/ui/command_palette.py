@@ -128,8 +128,9 @@ def build_palette(db_factory) -> list[PaletteAction]:
 async def open_palette(actions: list[PaletteAction]) -> int:
     """Show fuzzy picker; run the selected action."""
     import questionary
-    from app.ui.interactive import QSTYLE
     from questionary import Choice
+
+    from app.ui.interactive import QSTYLE
 
     choices = [Choice(a.label, value=i) for i, a in enumerate(actions)]
     choices.append(Choice("← cancel", value="__BACK__"))

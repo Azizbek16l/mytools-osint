@@ -40,7 +40,14 @@ class Severity(StrEnum):
 
 
 class Hit(BaseModel):
-    """A single OSINT finding. One Hit per (module, site/source) pair."""
+    """A single OSINT finding. One Hit per (module, site/source) pair.
+
+    ``confidence`` (0.0–1.0) is the producer's belief that this hit is real,
+    independent of severity. ``evidence`` is a small dict the producer fills
+    with the specific signals it used — useful for downstream renderers and
+    for audit / dispute trails (e.g. ``{"http_status": "200",
+    "matched": "og:title contains target"}``). Default 0.5 = uncertain.
+    """
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -55,6 +62,9 @@ class Hit(BaseModel):
     severity: Severity = Severity.INFO
     found_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     latency_ms: int = 0
+    # v1.1 — provenance + confidence (see app/core/confidence.py).
+    confidence: float = 0.5
+    evidence: dict[str, str] | None = None
 
     @property
     def is_positive(self) -> bool:

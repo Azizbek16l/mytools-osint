@@ -49,6 +49,7 @@ def test_hit_keys_are_always_full_set():
     assert keys == {
         "module", "source", "status", "severity", "title", "url",
         "evidence", "category", "elapsed_ms", "discovered_at",
+        "confidence", "provenance",
     }
     # unknown values are explicit None, never missing
     assert payload["hits"][0]["title"] is None
@@ -56,6 +57,9 @@ def test_hit_keys_are_always_full_set():
     assert payload["hits"][0]["evidence"] is None
     assert payload["hits"][0]["category"] is None
     assert payload["hits"][0]["elapsed_ms"] == 0
+    # v1.1 — provenance defaults to None, confidence to the model default 0.5
+    assert payload["hits"][0]["provenance"] is None
+    assert payload["hits"][0]["confidence"] == 0.5
 
 
 def test_iso8601_z_suffix_only():

@@ -38,9 +38,7 @@ import random
 import re
 import string
 from collections.abc import AsyncIterator
-from urllib.parse import urlparse
 
-from app.core.classify import classify_exception
 from app.core.http import _opsec_on, get_client
 from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity

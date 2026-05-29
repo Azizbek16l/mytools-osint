@@ -20,7 +20,6 @@ from app.core.http import get_client
 from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
 
-
 # ============================================================================
 # WAF DETECT
 # ============================================================================
@@ -54,7 +53,7 @@ async def _waf_run(query: Query) -> AsyncIterator[Hit]:
                   title=domain, detail=f"{type(e).__name__}: {e}")
         return
     hdrs_lower = {k.lower(): v.lower() for k, v in r.headers.items()}
-    hdr_summary = " · ".join(f"{k}:{v[:30]}" for k, v in hdrs_lower.items())
+    " · ".join(f"{k}:{v[:30]}" for k, v in hdrs_lower.items())
     matched: list[tuple[str, Severity]] = []
     for name, sev, sigs in WAF_SIGS:
         for sig in sigs:
@@ -207,7 +206,7 @@ async def _gql_run(query: Query) -> AsyncIterator[Hit]:
                           category="fingerprint",
                           url=url, status=HitStatus.FOUND,
                           title=f"GraphQL endpoint at /{path}",
-                          detail=f"GraphQL detected, introspection BLOCKED (good)",
+                          detail="GraphQL detected, introspection BLOCKED (good)",
                           severity=Severity.MEDIUM,
                           extra={"path": path, "introspection": False})
         except Exception:

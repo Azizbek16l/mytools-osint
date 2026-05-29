@@ -99,7 +99,10 @@ class TestDomain:
         api_hit = next(h for h in hits if h.source == "api.acme.com")
         assert api_hit.status == HitStatus.FOUND
         assert api_hit.severity == Severity.LOW
-        assert api_hit.extra["confidence"] == 1
+        # n_sources replaces the old extra["confidence"] integer (Hit.confidence
+        # is now a proper float 0.0–1.0); see app/core/confidence.py.
+        assert api_hit.extra["n_sources"] == 1
+        assert 0.0 < api_hit.confidence <= 1.0
         # crt.sh summary should be FOUND
         crt_summary = next(h for h in hits if h.source == "crt.sh (summary)")
         assert crt_summary.status == HitStatus.FOUND

@@ -77,7 +77,7 @@ def run_tui(query: Query, html_out: str | None = None) -> int:
         """
         BINDINGS = [Binding("escape", "dismiss_now", "cancel")]
 
-        def __init__(self, dashboard: "Dashboard") -> None:
+        def __init__(self, dashboard: Dashboard) -> None:
             super().__init__()
             self._dashboard = dashboard
 
@@ -243,7 +243,6 @@ def run_tui(query: Query, html_out: str | None = None) -> int:
 
         def action_search(self) -> None:
             """v4.0: prompt for inline filter — fuzzy substring across all fields."""
-            from textual.widgets import Input
             # textual's screens push/pop modally; for now we use a simple
             # asyncio prompt via the footer-level keybinding hint.
             # Better: pop a modal Input. Stub for now: cycle through 3 demos

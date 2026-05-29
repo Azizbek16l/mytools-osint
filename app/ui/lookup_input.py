@@ -43,6 +43,8 @@ SlashName = Literal[
     "settings", "version", "kind", "quit",
     # v4.3 chat-shell additions
     "theme", "profile", "graph", "opsec", "explain", "export",
+    # Wave A — pattern picker for AI explain
+    "pattern",
 ]
 
 # Canonical name → aliases (the canonical is always first). Used by the
@@ -64,6 +66,7 @@ SLASH_ALIASES: dict[SlashName, tuple[str, ...]] = {
     "opsec":    ("/opsec",),
     "explain":  ("/explain",),
     "export":   ("/export",),
+    "pattern":  ("/pattern", "/patterns"),
 }
 
 # Flat list of every recognised slash spelling (sorted for stable completion).
@@ -90,6 +93,7 @@ SLASH_DESCRIPTIONS: dict[SlashName, str] = {
     "opsec":    "toggle OPSEC mode for this session",
     "explain":  "toggle AI explain for the next scan",
     "export":   "export the last scan: /export <html|md|json|jsonl>",
+    "pattern":  "pick or list AI explain patterns: /pattern [name|list]",
 }
 
 KIND_VALUES: tuple[str, ...] = tuple(k.value for k in QueryKind)

@@ -582,8 +582,9 @@ class Database:
             qrow = await cur.fetchone()
         if not qrow:
             return (0, 0)
-        from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
         from datetime import datetime as _dt
+
+        from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
         query = Query(
             kind=QueryKind(qrow["kind"]),
             value=qrow["value"],

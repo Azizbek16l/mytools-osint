@@ -16,10 +16,7 @@ Behaviour:
 """
 from __future__ import annotations
 
-from typing import Awaitable
-
 from prompt_toolkit import Application
-from prompt_toolkit.formatted_text import HTML, to_formatted_text
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import HSplit, Layout, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
@@ -61,7 +58,7 @@ def _render(cursor: int):
     # Header
     lines.append(("class:header", "── main menu "))
     lines.append(("class:row.dim", "─" * 60 + "\n\n"))
-    for i, (key, _action, label, desc) in enumerate(_ENTRIES):
+    for i, (_key, _action, label, desc) in enumerate(_ENTRIES):
         is_cursor = (i == cursor)
         bullet = "▌ " if is_cursor else "  "
         cls = "class:cursor" if is_cursor else "class:row"

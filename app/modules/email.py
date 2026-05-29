@@ -19,6 +19,7 @@ from pathlib import Path
 import dns.asyncresolver
 from email_validator import EmailNotValidError, validate_email
 
+from app.core.confidence import score_breach_hit, score_email_format_hit
 from app.core.config import settings
 from app.core.http import get_client
 from app.core.runner import Runner
@@ -45,12 +46,16 @@ async def _validate(email: str) -> Hit:
             status=HitStatus.FOUND, title="email format valid",
             detail=f"local={info.local_part} domain={info.domain}",
             extra={"local": info.local_part, "domain": info.domain},
+            confidence=score_email_format_hit(format_valid=True, mx_present=False),
+            evidence={"format_valid": "true"},
         )
     except EmailNotValidError as e:
         return Hit(
             module=NAME, source="format", category="validation",
             status=HitStatus.NOT_FOUND, title="email format invalid",
             detail=str(e), severity=Severity.LOW,
+            confidence=score_email_format_hit(format_valid=False, mx_present=False),
+            evidence={"format_valid": "false", "reason": str(e)[:160]},
         )
 
 
@@ -68,6 +73,9 @@ async def _mx(email: str) -> Hit:
             title=f"MX records for {domain}",
             detail=", ".join(hosts[:5]),
             extra={"mx": hosts},
+            confidence=score_email_format_hit(format_valid=True, mx_present=bool(hosts)),
+            evidence={"mx_count": str(len(hosts)),
+                      "mx_first": hosts[0] if hosts else ""},
         )
     except Exception as e:
         return Hit(module=NAME, source="mx", status=HitStatus.ERROR, detail=str(e))
@@ -120,6 +128,15 @@ async def _hibp(email: str) -> AsyncIterator[Hit]:
                     url=f"https://haveibeenpwned.com/PwnedWebsites#{b.get('Name','')}",
                     severity=Severity.HIGH if b.get("IsSensitive") else Severity.MEDIUM,
                     extra=b,
+                    confidence=score_breach_hit(
+                        source_authoritative=True,
+                        has_password="Passwords" in (b.get("DataClasses") or []),
+                    ),
+                    evidence={
+                        "breach": str(b.get("Name", "")),
+                        "breach_date": str(b.get("BreachDate", "")),
+                        "data_classes": ", ".join(b.get("DataClasses", [])[:6]),
+                    },
                 )
         elif r.status_code == 404:
             yield Hit(module=NAME, source="HIBP", category="breach",
@@ -249,6 +266,13 @@ async def _proxynova(email: str) -> AsyncIterator[Hit]:
                     detail=detail, url="https://www.proxynova.com/tools/comb",
                     severity=Severity.CRITICAL,
                     extra={"line": raw},
+                    confidence=score_breach_hit(
+                        source_authoritative=True, has_password=True,
+                    ),
+                    evidence={
+                        "match_kind": "exact_email_left_side",
+                        "pw_len": str(len(pw)),
+                    },
                 )
         elif r.status_code in (429, 403):
             yield Hit(module=NAME, source="ProxyNova ComB", category="breach",

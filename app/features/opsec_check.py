@@ -14,9 +14,7 @@ while --opsec is active.
 from __future__ import annotations
 
 import asyncio
-import os
 import statistics
-import sys
 import time
 
 from app.core.http import _opsec_on, get_client
@@ -56,7 +54,7 @@ async def _tor_exit_check(ip: str) -> tuple[bool, str]:
     """Hit Tor Project's check endpoint — confirms if `ip` is a known exit."""
     try:
         client = await get_client()
-        r = await client.get(f"https://check.torproject.org/api/ip", timeout=8.0)
+        r = await client.get("https://check.torproject.org/api/ip", timeout=8.0)
         if r.status_code != 200:
             return False, f"HTTP {r.status_code}"
         try:

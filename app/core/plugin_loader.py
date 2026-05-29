@@ -112,7 +112,7 @@ def cmd_plugin(argv: list[str]) -> int:
         except Exception:
             # pip search was deprecated on the official index. Fall back to
             # browser-style hint.
-            print(f"  pip search is disabled on PyPI. Try:")
+            print("  pip search is disabled on PyPI. Try:")
             print(f"    https://pypi.org/search/?q=mytools-osint-{q}")
         return 0
     if sub == "install" and len(argv) >= 2:

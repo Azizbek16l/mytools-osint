@@ -22,6 +22,7 @@ from collections.abc import AsyncIterator
 
 import dns.asyncresolver
 
+from app.core.confidence import score_domain_dns_hit, score_subdomain_hit
 from app.core.http import get_client
 from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
@@ -302,6 +303,8 @@ async def _records(domain: str) -> AsyncIterator[Hit]:
                     status=HitStatus.FOUND, title=domain,
                     detail=", ".join(vals[:6]),
                     extra={rtype: vals},
+                    confidence=score_domain_dns_hit(rtype, present=True),
+                    evidence={"record_type": rtype, "value_count": str(len(vals))},
                 )
         except Exception:
             pass
@@ -375,7 +378,12 @@ async def run(query: Query) -> AsyncIterator[Hit]:
             module=NAME, source=sub, category="subdomain",
             status=HitStatus.FOUND, title=sub,
             detail=detail, url=f"https://{sub}",
-            severity=sev, extra={"sources": list(sources), "confidence": n},
+            severity=sev, extra={"sources": list(sources), "n_sources": n},
+            confidence=score_subdomain_hit(num_sources=n),
+            evidence={
+                "n_sources": str(n),
+                "sources": ", ".join(sorted(passive))[:200],
+            },
         )
 
     # Per-source summary. Tagged category="summary" so cli.py can hide them by

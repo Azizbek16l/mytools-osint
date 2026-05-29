@@ -22,7 +22,7 @@ from typing import Any
 from app import __version__ as TOOL_VERSION  # single source of truth (was "0.1.0")
 from app.core.types import Hit, HitStatus, QueryResult, Severity
 
-JSON_SCHEMA_VERSION = "1.0"
+JSON_SCHEMA_VERSION = "1.1"
 TOOL_NAME = "mytools-osint"
 
 # Ranking used for stable sort. Higher = more important.
@@ -51,7 +51,13 @@ def _to_iso_z(dt: datetime | None) -> str | None:
 
 
 def _serialize_hit(hit: Hit) -> dict[str, Any]:
-    """Emit the locked Hit shape. Always the same keys."""
+    """Emit the locked Hit shape. Always the same keys.
+
+    v1.1 adds ``confidence`` (float 0.0–1.0) and ``provenance`` (the
+    producer's structured evidence dict). ``evidence`` keeps its historical
+    meaning — the free-form ``detail`` string the analyst sees on screen —
+    so we don't break existing JSON consumers parsing v1.0 hits.
+    """
     return {
         "module": hit.module or None,
         "source": hit.source or None,
@@ -63,6 +69,8 @@ def _serialize_hit(hit: Hit) -> dict[str, Any]:
         "category": hit.category or None,
         "elapsed_ms": int(round(hit.latency_ms)) if hit.latency_ms else 0,
         "discovered_at": _to_iso_z(hit.found_at),
+        "confidence": round(float(hit.confidence), 3),
+        "provenance": dict(hit.evidence) if hit.evidence else None,
     }
 
 
@@ -98,10 +106,17 @@ def _summarize(hits: list[Hit]) -> dict[str, Any]:
     }
 
 
-def _sort_key(hit_dict: dict[str, Any]) -> tuple[int, str, str]:
-    """Stable, diff-friendly: (severity DESC, status ASC, source ASC)."""
+def _sort_key(hit_dict: dict[str, Any]) -> tuple[int, float, str, str]:
+    """Stable, diff-friendly sort: severity DESC → confidence DESC → status → source.
+
+    Adding confidence as a secondary key (v1.1) makes the top of the list more
+    actionable — within a given severity, the analyst sees the most certain
+    findings first.
+    """
     sev_rank = _SEVERITY_RANK.get(hit_dict.get("severity") or "", 0)
-    return (-sev_rank, hit_dict.get("status") or "", hit_dict.get("source") or "")
+    conf = float(hit_dict.get("confidence") or 0.0)
+    return (-sev_rank, -conf, hit_dict.get("status") or "",
+            hit_dict.get("source") or "")
 
 
 def serialize_query_result(result: QueryResult) -> dict[str, Any]:
@@ -215,6 +230,7 @@ def validate_schema(payload: dict[str, Any]) -> None:
     expected_hit_keys = {
         "module", "source", "status", "severity", "title", "url",
         "evidence", "category", "elapsed_ms", "discovered_at",
+        "confidence", "provenance",
     }
     for i, h in enumerate(hits):
         _require(isinstance(h, dict), f"hits[{i}] must be a dict")
@@ -231,3 +247,13 @@ def validate_schema(payload: dict[str, Any]) -> None:
                  f"hits[{i}].elapsed_ms must be non-negative int")
         _require(h["discovered_at"] is None or _is_iso_z(h["discovered_at"]),
                  f"hits[{i}].discovered_at must be ISO-Z or null")
+        conf = h["confidence"]
+        _require(isinstance(conf, (int, float)) and 0.0 <= float(conf) <= 1.0,
+                 f"hits[{i}].confidence must be a float in [0.0, 1.0], got {conf!r}")
+        prov = h["provenance"]
+        _require(prov is None or isinstance(prov, dict),
+                 f"hits[{i}].provenance must be a dict or null")
+        if isinstance(prov, dict):
+            for k, v in prov.items():
+                _require(isinstance(k, str) and isinstance(v, str),
+                         f"hits[{i}].provenance keys/values must be strings")

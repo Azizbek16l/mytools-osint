@@ -25,12 +25,11 @@ from app.core.db import Database
 from app.core.entities import (
     PIVOT_PROFILE,
     EntityType,
-    canonical_key,
     is_noisy,
 )
 from app.core.profiles import apply_profile
 from app.core.runner import runner as _runner
-from app.core.types import Hit, Query, QueryKind, QueryResult
+from app.core.types import Query, QueryKind, QueryResult
 
 log = logging.getLogger("mytools-osint.pivot")
 

@@ -19,7 +19,6 @@ import asyncio
 import base64
 import contextlib
 import json
-import os
 import secrets
 import struct
 import sys
@@ -63,7 +62,7 @@ async def _ws_connect(host: str, path: str = "/") -> tuple[asyncio.StreamReader,
 async def _ws_recv_frame(reader: asyncio.StreamReader) -> bytes | None:
     """Read one WebSocket text frame (server→client; never masked)."""
     head = await reader.readexactly(2)
-    fin = head[0] & 0x80
+    head[0] & 0x80
     opcode = head[0] & 0x0F
     if opcode == 0x8:  # close
         return None
@@ -89,7 +88,7 @@ async def _watch(pattern: str, max_events: int | None = None) -> int:
     needle = pattern.lower()
     print(f"\n  \033[1mosint cert-watch\033[0m  \033[2mpattern: '{pattern}'\033[0m")
     print(f"  \033[2mendpoint: {CERTSTREAM_WS} (Calidog public CT firehose)\033[0m")
-    print(f"  \033[2mctrl-C to stop\033[0m")
+    print("  \033[2mctrl-C to stop\033[0m")
     print("  " + "─" * 70)
     reconnect_delay = 1.0
     seen = 0

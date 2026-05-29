@@ -22,17 +22,12 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
-from typing import Any
 
 from app.core.entities import (
-    EDGE_COST,
-    DEFAULT_EDGE_COST,
     Edge,
     EdgeType,
     Entity,
     EntityType,
-    canonical_key,
-    entity_id,
     is_noisy,
 )
 from app.core.types import Hit, HitStatus, Query, QueryKind

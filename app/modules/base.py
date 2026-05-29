@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.core.confidence import score_username_hit
 from app.core.http import get_client
 from app.core.types import Hit, HitStatus, Severity
 
@@ -264,6 +265,23 @@ async def probe_site(
     if status == HitStatus.FOUND and enrich_bits:
         detail = " | ".join(enrich_bits[:3])
 
+    # Confidence + evidence trail. We score whatever the final status ends up as
+    # (a soft-404 downgraded to NOT_FOUND gets ~0.05 — the producer is very
+    # sure the account is absent; a bare 200 stays uncertain at ~0.40).
+    confidence = score_username_hit(
+        code=code, soft_404=soft_404,
+        strong_match=strong_match, has_og=bool(og),
+    )
+    evidence: dict[str, str] = {
+        "http_status": str(code),
+        "soft_404": "true" if soft_404 else "false",
+        "strong_match": "true" if strong_match else "false",
+    }
+    if og.get("og:title"):
+        evidence["og_title_excerpt"] = og["og:title"][:80]
+    if page_title:
+        evidence["page_title_excerpt"] = page_title[:80]
+
     return Hit(
         module=module,
         source=site["name"],
@@ -275,6 +293,8 @@ async def probe_site(
         severity=severity,
         latency_ms=latency,
         extra=extra,
+        confidence=confidence,
+        evidence=evidence,
     )
 
 

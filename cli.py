@@ -1032,6 +1032,11 @@ def main(argv: list[str] | None = None) -> int:
         "export": ("push findings into a SIEM (Splunk/Elastic/syslog/MISP)",
             "usage: osint export <kind> <value> --to <target>\n"
             "  see `osint export --help` for env vars per target"),
+        "doctor": ("local diagnostic: system + AI providers + network",
+            "usage: osint doctor\n"
+            "  prints OS / RAM / Python, Ollama reachability + installed models,\n"
+            "  Claude key state, active provider, config dir perms, and a quick\n"
+            "  network probe. Exit codes: 0 ok, 1 warnings, 2 errors."),
     }
     if raw and raw[0] in _SUB_HELP and len(raw) > 1 and raw[1] in ("-h", "--help"):
         summary, body = _SUB_HELP[raw[0]]
@@ -1077,6 +1082,9 @@ def main(argv: list[str] | None = None) -> int:
     if raw and raw[0] == "ai":
         from app.features.ai import cmd_ai
         return cmd_ai(raw[1:])
+    if raw and raw[0] == "doctor":
+        from app.features.doctor import cmd_doctor
+        return cmd_doctor(raw[1:])
     if raw and raw[0] == "completion":
         shell = raw[1] if len(raw) > 1 else "bash"
         # Try filesystem path first (dev), then importlib resources (installed wheel).
