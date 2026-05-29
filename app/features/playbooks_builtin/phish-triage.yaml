@@ -1,0 +1,13 @@
+id: phish-triage
+name: Phishing triage
+steps:
+  - id: dns
+    run: domain-recon
+  - id: ssl
+    run: ssl_tls
+  - id: breach
+    run: email_extras
+    when: kind == 'email'
+  - id: pivot_agent
+    run: agent
+    when: any_severity >= 'high'

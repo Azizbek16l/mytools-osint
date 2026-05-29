@@ -1,0 +1,15 @@
+id: shared-ip
+name: Multiple subdomains behind the same IP
+severity: medium
+description: |
+  Groups subdomains by their resolved IP (RESOLVES_TO edges) and emits one
+  finding per IP that hosts >= 3 subdomains. Suggests shared infra and
+  potential lateral pivot surface.
+match:
+  entities:
+    type: subdomain
+    group_by: resolves_to
+    min_group_size: 3
+output:
+  title: "{group} hosts {count} subdomains"
+  evidence_field: subdomains

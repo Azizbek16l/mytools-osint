@@ -1,0 +1,15 @@
+id: dangling-cname-takeover
+name: Subdomain with a takeover-candidate flag
+severity: high
+description: |
+  Subdomains tagged TAKEOVER_CANDIDATE by the takeover module — they
+  CNAME to an unclaimed service hostname (Heroku app gone, S3 bucket
+  released, etc.). Each match is an attacker hijack opportunity.
+match:
+  entities:
+    type: subdomain
+    has_edge: takeover_candidate
+    min_group_size: 1
+output:
+  title: "Dangling subdomain takeover candidate: {value}"
+  evidence_field: subdomain

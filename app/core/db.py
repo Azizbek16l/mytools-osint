@@ -142,6 +142,55 @@ _MIGRATIONS: list[tuple[int, str]] = [
         );
         """,
     ),
+    (
+        4,
+        # Wave D — named cases / investigations. A case is a labelled bucket
+        # that groups multiple scans + analyst notes + the entities each scan
+        # discovered. The same QueryResult can belong to many cases (just adds
+        # another row to case_runs). case_entities is the flat union used for
+        # `case show` / `case resume` without re-walking the edges graph.
+        """
+        CREATE TABLE IF NOT EXISTS cases (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug       TEXT NOT NULL UNIQUE,
+            name       TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            status     TEXT NOT NULL DEFAULT 'open',
+            kind       TEXT NOT NULL DEFAULT '',
+            target     TEXT NOT NULL DEFAULT '',
+            notes      TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status);
+
+        CREATE TABLE IF NOT EXISTS case_runs (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id     INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+            query_id    INTEGER NOT NULL REFERENCES queries(id) ON DELETE CASCADE,
+            started_at  TEXT NOT NULL,
+            finished_at TEXT,
+            profile     TEXT NOT NULL DEFAULT '',
+            agent_used  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_case_runs_case ON case_runs(case_id, started_at DESC);
+
+        CREATE TABLE IF NOT EXISTS case_notes (
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+            ts      TEXT NOT NULL,
+            body    TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_case_notes_case ON case_notes(case_id, ts DESC);
+
+        CREATE TABLE IF NOT EXISTS case_entities (
+            case_id    INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+            entity_id  TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+            first_seen TEXT NOT NULL,
+            PRIMARY KEY (case_id, entity_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_case_entities_case ON case_entities(case_id);
+        """,
+    ),
 ]
 
 

@@ -1,0 +1,9 @@
+id: subdomain-deepdive
+name: Subdomain deep-dive
+steps:
+  - id: enum
+    run: domain-recon
+  - id: chase_first
+    run: domain-recon
+    when: count('found') > 0
+    target_from: hits[0].url

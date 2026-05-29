@@ -1,0 +1,15 @@
+id: exposed-admin
+name: Exposed admin / login interface on a discovered subdomain
+severity: medium
+description: |
+  Subdomain or URL entities whose value matches /admin|login|wp-admin/.
+  These usually indicate a public auth surface that the org probably
+  doesn't want indexed. One finding per match.
+match:
+  entities:
+    type: subdomain
+    value_regex: "(?i)(admin|login|wp-admin|portal|webmail)"
+    min_group_size: 1
+output:
+  title: "Exposed admin/login surface: {value}"
+  evidence_field: subdomain

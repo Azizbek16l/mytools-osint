@@ -450,6 +450,62 @@ async def _stream_run(q: Query, args: argparse.Namespace, st: Style, sink) -> in
                     print(st.dim(f"  graph: +{ent_n} entities · +{edge_n} edges "
                                  f"→ `osint graph show {q.kind.value} {q.value}`"),
                           file=sys.stderr)
+                # Wave D: --case SLUG attaches this scan to a named case.
+                case_slug = getattr(args, "case", None)
+                if case_slug:
+                    from app.features import cases as _cases
+                    c = await _cases.get(db, case_slug)
+                    if c is None:
+                        print(st.bad(f"  --case {case_slug!r} not found "
+                                     f"(use `osint case new {case_slug}`)"),
+                              file=sys.stderr)
+                    else:
+                        # Avoid double-save: we already saved above. Insert
+                        # the case_runs row + case_entities directly.
+                        assert db._conn is not None
+                        from datetime import UTC as _UTC
+                        from datetime import datetime as _dt
+                        started_iso = (
+                            result.query.started_at.isoformat()
+                            if result.query.started_at
+                            else _dt.now(_UTC).isoformat()
+                        )
+                        finished_iso = (
+                            result.finished_at.isoformat()
+                            if result.finished_at else None
+                        )
+                        await db._conn.execute(
+                            """INSERT INTO case_runs
+                               (case_id, query_id, started_at, finished_at,
+                                profile, agent_used)
+                               VALUES (?, ?, ?, ?, ?, 0)""",
+                            (c.id, qid, started_iso, finished_iso,
+                             (getattr(args, "profile", None) or "")),
+                        )
+                        async with db._conn.execute(
+                            """SELECT DISTINCT e.id FROM entities e
+                               JOIN edges ed ON ed.dst_id = e.id OR ed.src_id = e.id
+                               WHERE ed.hit_id IN
+                                 (SELECT id FROM hits WHERE query_id = ?)""",
+                            (qid,),
+                        ) as cur:
+                            ent_ids = [r["id"] for r in await cur.fetchall()]
+                        if ent_ids:
+                            now_iso = _dt.now(_UTC).isoformat()
+                            await db._conn.executemany(
+                                """INSERT OR IGNORE INTO case_entities
+                                   (case_id, entity_id, first_seen)
+                                   VALUES (?, ?, ?)""",
+                                [(c.id, eid, now_iso) for eid in ent_ids],
+                            )
+                        await db._conn.execute(
+                            "UPDATE cases SET updated_at = ? WHERE id = ?",
+                            (_dt.now(_UTC).isoformat(), c.id),
+                        )
+                        await db._conn.commit()
+                        print(st.dim(f"  case[{case_slug}]: attached run "
+                                     f"(+{len(ent_ids)} entities)"),
+                              file=sys.stderr)
                 # v4.0 auto-pivot — runs AFTER stream drain (no nested-callback deadlock)
                 pivot_depth = getattr(args, "pivot", 0) or 0
                 if pivot_depth > 0:
@@ -608,6 +664,10 @@ subcommands (run any of these in place of <value>):
   preset list|show|run <name>           YAML-defined saved scans
   plugin list|install|search|remove     third-party plugin loader
   ai explain|query                       Claude-powered analysis (needs ANTHROPIC_API_KEY)
+  case new|list|show|note|close|reopen|resume|rm        named investigations (Wave D)
+  rules list|run [--case SLUG]          correlation rules engine (Wave D)
+  playbook list|run <id> <target>       conditional DAG playbooks (Wave D)
+  schedule install|list|remove          opt-in OS scheduler (launchd/systemd/Task Sched.)
 """
 
 
@@ -685,6 +745,9 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--explain", action="store_true",
                     help="after the scan, ask Claude for an executive summary "
                          "(needs ANTHROPIC_API_KEY; disabled in --opsec)")
+    ap.add_argument("--case", default=None, metavar="SLUG",
+                    help="attach this scan's result to a named case (Wave D). "
+                         "The case must already exist (use `osint case new`).")
     return ap
 
 
@@ -870,6 +933,205 @@ def _handle_watch_subcommand(argv: list[str]) -> int:
     return asyncio.run(_run())
 
 
+def _handle_case_subcommand(argv: list[str]) -> int:
+    """`osint case ...` — Wave D named investigations dispatcher."""
+    usage = (
+        "usage:\n"
+        "  osint case new <slug> [--name N] [--kind K] [--target V]\n"
+        "  osint case list [--all|--open|--closed]\n"
+        "  osint case show <slug>\n"
+        "  osint case note <slug> [\"body\" | --from-stdin]\n"
+        "  osint case close <slug>\n"
+        "  osint case reopen <slug>\n"
+        "  osint case resume <slug>\n"
+        "  osint case rm <slug> [--force]\n"
+    )
+    sub = argv[0] if argv else ""
+    if sub in ("", "-h", "--help"):
+        print(usage, file=sys.stderr)
+        return 0 if sub else 2
+
+    from app.core.config import settings
+    from app.core.db import Database
+    from app.features import cases as cases_mod
+
+    async def _run() -> int:
+        load_settings()
+        db = Database(settings().db_path)
+        await db.connect()
+        try:
+            if sub == "new":
+                if len(argv) < 2:
+                    print(usage, file=sys.stderr); return 2
+                slug = argv[1]
+                name = kind = target = None
+                rest = argv[2:]; i = 0
+                while i < len(rest):
+                    tok = rest[i]
+                    if tok == "--name" and i + 1 < len(rest):
+                        name = rest[i + 1]; i += 2; continue
+                    if tok == "--kind" and i + 1 < len(rest):
+                        kind = rest[i + 1]; i += 2; continue
+                    if tok == "--target" and i + 1 < len(rest):
+                        target = rest[i + 1]; i += 2; continue
+                    i += 1
+                try:
+                    c = await cases_mod.new(db, slug, name=name, kind=kind, target=target)
+                except ValueError as e:
+                    print(f"  error: {e}", file=sys.stderr); return 2
+                except Exception as e:
+                    print(f"  error: {e}", file=sys.stderr); return 1
+                print(f"  + case #{c.id} {c.slug}  status={c.status}"
+                      + (f"  name={c.name!r}" if c.name else "")
+                      + (f"  target={c.kind}:{c.target}" if c.target else ""))
+                return 0
+            if sub == "list":
+                rest = argv[1:]
+                status_filter = "open"
+                if "--all" in rest:
+                    status_filter = "all"
+                elif "--closed" in rest:
+                    status_filter = "closed"
+                elif "--open" in rest:
+                    status_filter = "open"
+                rows = await cases_mod.list_cases(db, status=status_filter)
+                if not rows:
+                    print("  (no cases)")
+                    return 0
+                try:
+                    from rich.console import Console
+                    from rich.table import Table
+                    table = Table(title=f"cases ({status_filter})")
+                    table.add_column("slug"); table.add_column("name")
+                    table.add_column("status"); table.add_column("runs", justify="right")
+                    table.add_column("entities", justify="right")
+                    table.add_column("last activity")
+                    for c in rows:
+                        # cheap counts via the same DB conn
+                        assert db._conn is not None
+                        async with db._conn.execute(
+                            "SELECT COUNT(*) AS n FROM case_runs WHERE case_id = ?",
+                            (c.id,),
+                        ) as cur:
+                            n_runs = (await cur.fetchone())["n"]
+                        async with db._conn.execute(
+                            "SELECT COUNT(*) AS n FROM case_entities WHERE case_id = ?",
+                            (c.id,),
+                        ) as cur:
+                            n_ents = (await cur.fetchone())["n"]
+                        table.add_row(c.slug, c.name or "", c.status,
+                                      str(n_runs), str(n_ents),
+                                      c.updated_at.isoformat(timespec="minutes"))
+                    Console().print(table)
+                except ImportError:
+                    for c in rows:
+                        print(f"  {c.slug:<24} {c.status:<7} {c.name}  "
+                              f"updated={c.updated_at.isoformat(timespec='minutes')}")
+                return 0
+            if sub == "show":
+                if len(argv) < 2:
+                    print(usage, file=sys.stderr); return 2
+                c = await cases_mod.get(db, argv[1])
+                if c is None:
+                    print(f"  case {argv[1]!r} not found", file=sys.stderr); return 1
+                print(f"\n  {c.slug}  ({c.status})  name={c.name or '-'}  "
+                      f"kind={c.kind or '-'}  target={c.target or '-'}")
+                print(f"  created={c.created_at.isoformat(timespec='minutes')}  "
+                      f"updated={c.updated_at.isoformat(timespec='minutes')}")
+                tl = await c.timeline(db)
+                if not tl:
+                    print("  (timeline empty)")
+                    return 0
+                for ev in tl:
+                    if ev["type"] == "run":
+                        agent = " (agent)" if ev.get("agent_used") else ""
+                        print(f"  · {ev['ts']:<25}  run  {ev['kind']}={ev['target']}  "
+                              f"profile={ev.get('profile') or '-'}"
+                              f"  hits={ev['found']}/{ev['hits']}{agent}")
+                    else:
+                        print(f"  · {ev['ts']:<25}  note  {ev['body'][:120]}")
+                return 0
+            if sub == "note":
+                if len(argv) < 2:
+                    print(usage, file=sys.stderr); return 2
+                slug = argv[1]
+                c = await cases_mod.get(db, slug)
+                if c is None:
+                    print(f"  case {slug!r} not found", file=sys.stderr); return 1
+                rest = argv[2:]
+                body = ""
+                if "--from-stdin" in rest:
+                    body = sys.stdin.read()
+                else:
+                    body = " ".join(rest).strip()
+                if not body.strip():
+                    print("  empty note — nothing added", file=sys.stderr); return 2
+                nid = await c.add_note(db, body)
+                print(f"  + note #{nid}")
+                return 0
+            if sub in ("close", "reopen"):
+                if len(argv) < 2:
+                    print(usage, file=sys.stderr); return 2
+                c = await cases_mod.get(db, argv[1])
+                if c is None:
+                    print(f"  case {argv[1]!r} not found", file=sys.stderr); return 1
+                await c.set_status(db, "closed" if sub == "close" else "open")
+                print(f"  {c.slug} -> {c.status}")
+                return 0
+            if sub == "resume":
+                if len(argv) < 2:
+                    print(usage, file=sys.stderr); return 2
+                c = await cases_mod.get(db, argv[1])
+                if c is None:
+                    print(f"  case {argv[1]!r} not found", file=sys.stderr); return 1
+                rc = await c.resume(db)
+                if not rc.last_target and not rc.seed_target:
+                    print(f"  case {c.slug} has no prior run and no seed target — "
+                          "use `osint case new --target ... --kind ...`",
+                          file=sys.stderr)
+                    return 1
+                kind_s = rc.last_kind or rc.seed_kind or "username"
+                tgt = rc.last_target or rc.seed_target
+                profile = rc.last_profile or "quick"
+                print(f"  resuming {c.slug}: {kind_s}={tgt}  profile={profile}"
+                      + ("  (was agent)" if rc.last_agent_used else ""))
+                from app.core.runner import runner as _runner
+                from app.core.types import Query, QueryKind
+                r = _runner()
+                try:
+                    from app.core.profiles import apply_profile
+                    apply_profile(r, profile)
+                except ValueError:
+                    pass  # unknown profile — leave runner state alone
+                q = Query(kind=QueryKind(kind_s), value=tgt)
+                qr = await r.run(q)
+                run_id = await c.attach_run(db, qr, profile=profile,
+                                            agent_used=rc.last_agent_used)
+                print(f"  + attached run #{run_id}  hits={qr.found}/{qr.total}")
+                return 0
+            if sub == "rm":
+                if len(argv) < 2:
+                    print(usage, file=sys.stderr); return 2
+                slug = argv[1]
+                if "--force" not in argv[2:]:
+                    print("  refusing to remove without --force "
+                          "(this is destructive; cascades to runs + notes + entities)",
+                          file=sys.stderr)
+                    return 2
+                ok = await cases_mod.remove(db, slug)
+                print("  - removed" if ok else "  not found")
+                return 0 if ok else 1
+            print(usage, file=sys.stderr); return 2
+        finally:
+            await db.close()
+            try:
+                await close_client()
+            except Exception:
+                pass
+
+    return asyncio.run(_run())
+
+
 def _handle_diff_subcommand(argv: list[str]) -> int:
     """`osint diff <kind> <value> [--from ID] [--to ID]` — compare two historical scans."""
     usage = "usage: osint diff <kind> <value> [--from ID] [--to ID]"
@@ -1041,6 +1303,23 @@ def main(argv: list[str] | None = None) -> int:
             "usage: osint agent <target> [--no-approve]\n"
             "  Bounded ReAct loop (max 8 steps, 4000 tokens) using the active\n"
             "  LLM provider. Prompts for plan approval unless --no-approve."),
+        "case": ("named investigations (Wave D)",
+            "usage: osint case <new|list|show|note|close|reopen|resume|rm> ...\n"
+            "  new <slug> [--name N] [--kind K] [--target V]\n"
+            "  list [--all|--open|--closed]\n"
+            "  show <slug>            timeline of runs + notes\n"
+            "  note <slug> \"...\"    add a note (or --from-stdin)\n"
+            "  close <slug> / reopen <slug>\n"
+            "  resume <slug>          re-run the last action of the case\n"
+            "  rm <slug> [--force]"),
+        "rules": ("correlation rules engine (Wave D)",
+            "usage: osint rules <list|run> [--case SLUG] [--id RULE]"),
+        "playbook": ("conditional DAG playbooks (Wave D)",
+            "usage: osint playbook <list|run> <id> <target> [--case SLUG]"),
+        "schedule": ("opt-in OS scheduler (launchd / systemd / Task Scheduler)",
+            "usage: osint schedule <install|list|remove> ...\n"
+            "  install <slug-or-target> --every <Nh|cron> [--profile NAME] [--dry-run]\n"
+            "  list / remove <name>"),
     }
     if raw and raw[0] in _SUB_HELP and len(raw) > 1 and raw[1] in ("-h", "--help"):
         summary, body = _SUB_HELP[raw[0]]
@@ -1089,6 +1368,17 @@ def main(argv: list[str] | None = None) -> int:
     if raw and raw[0] == "agent":
         from app.features.agent import cmd_agent
         return cmd_agent(raw[1:])
+    if raw and raw[0] == "case":
+        return _handle_case_subcommand(raw[1:])
+    if raw and raw[0] == "rules":
+        from app.features.correlation import cmd_rules
+        return cmd_rules(raw[1:])
+    if raw and raw[0] == "playbook":
+        from app.features.playbooks import cmd_playbook
+        return cmd_playbook(raw[1:])
+    if raw and raw[0] == "schedule":
+        from app.features.scheduler import cmd_schedule
+        return cmd_schedule(raw[1:])
     if raw and raw[0] == "doctor":
         from app.features.doctor import cmd_doctor
         return cmd_doctor(raw[1:])
