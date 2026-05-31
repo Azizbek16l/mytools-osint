@@ -23,11 +23,19 @@ from app.core.types import HitStatus, Query, QueryResult  # noqa: I001
 
 _SEV_COLOR = {
     "info":     ("#8fa1b3", "#1b2a36"),
-    "low":      ("#83c5ff", "#0e2a40"),
+    "low":      ("#9cd0ff", "#0e2a40"),
     "medium":   ("#f6c177", "#3a2a10"),
-    "high":     ("#f47c7c", "#3a1414"),
+    "high":     ("#f9a7a7", "#3a1414"),
+    # critical token unified with the dashboard (--crit/--crit-bg in web.py).
     "critical": ("#ff5c5c", "#451010"),
 }
+# Distinct shape per severity so it is NEVER conveyed by colour alone (a11y);
+# high (▲) and critical (◆) differ in glyph even though both are red-ish.
+_SEV_GLYPH = {
+    "info": "·", "low": "◇", "medium": "●", "high": "▲", "critical": "◆",
+}
+# Numeric rank for client-side sort (high → low).
+_SEV_RANK = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
 _STATUS_DOT = {
     "found": "●", "not_found": "○", "uncertain": "?", "error": "✕",
     "ratelimited": "▲", "unavailable": "~", "no_data": "·", "skipped": "·",
@@ -85,9 +93,16 @@ def _render_interactive_graph(entities: list[dict] | None,
     """
     if not entities:
         return ""
+    # Deterministic seed layout (circle) computed server-side so a static /
+    # JS-off / reduced-motion render is meaningful instead of a blank void, and
+    # so the simulation starts from a sane state rather than Math.random noise.
+    _w, _h, _n = 1100, 600, max(1, len(entities))
     nodes_js = json.dumps(
         [{"id": e["id"], "type": e["type"], "label": e["value"][:50],
-          "color": _ENTITY_COLORS.get(e["type"], "#8fa1b3")} for e in entities]
+          "color": _ENTITY_COLORS.get(e["type"], "#8fa1b3"),
+          "sx": round(_w / 2 + math.cos(2 * math.pi * i / _n - math.pi / 2) * 200, 1),
+          "sy": round(_h / 2 + math.sin(2 * math.pi * i / _n - math.pi / 2) * 200, 1)}
+         for i, e in enumerate(entities)]
     )
     edges_js = json.dumps(
         [{"source": e["src"], "target": e["dst"], "rel": e["rel"]}
@@ -126,14 +141,16 @@ def _render_interactive_graph(entities: list[dict] | None,
     (function() {{
       const nodes = {nodes_js};
       const links = {edges_js};
-      // Layout state
+      // Layout state — start from the server-computed deterministic seed.
       const W = 1100, H = 600;
       for (const n of nodes) {{
-        n.x = W/2 + (Math.random() - 0.5) * 200;
-        n.y = H/2 + (Math.random() - 0.5) * 200;
+        n.x = (n.sx != null) ? n.sx : W/2;
+        n.y = (n.sy != null) ? n.sy : H/2;
         n.vx = 0; n.vy = 0;
         n.fixed = false;
       }}
+      const reduceMotion = window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       const linkMap = links.map(l => ({{
         source: nodes.find(n => n.id === l.source),
         target: nodes.find(n => n.id === l.target),
@@ -156,9 +173,31 @@ def _render_interactive_graph(entities: list[dict] | None,
         root.appendChild(ln);
         return ln;
       }});
+      function showDetail(n) {{
+        const inLinks = linkMap.filter(l => l.target === n);
+        const outLinks = linkMap.filter(l => l.source === n);
+        const panel = document.getElementById('igraph-panel');
+        // Safe-DOM: build with textContent, never innerHTML from node data.
+        panel.replaceChildren();
+        const t = document.createElement('div');
+        t.style.cssText = 'color:' + n.color + ';font-weight:600;margin-bottom:4px;';
+        t.textContent = n.type;
+        const lab = document.createElement('div');
+        lab.style.cssText = 'word-break:break-all;color:#e6edf3;font-weight:600;margin-bottom:6px;';
+        lab.textContent = n.label;
+        const meta = document.createElement('div');
+        meta.style.cssText = 'color:#9ba9b8;font-size:10.5px;margin-top:8px;';
+        meta.textContent = '↓ ' + inLinks.length + ' incoming · ↑ ' + outLinks.length + ' outgoing';
+        panel.append(t, lab, meta);
+        panel.style.display = 'block';
+      }}
       const nodeEls = nodes.map(n => {{
         const g = document.createElementNS(ns, 'g');
         g.style.cursor = 'pointer';
+        // a11y: focusable, named, keyboard-activatable.
+        g.setAttribute('tabindex', '0');
+        g.setAttribute('role', 'button');
+        g.setAttribute('aria-label', n.type + ': ' + n.label);
         const c = document.createElementNS(ns, 'circle');
         c.setAttribute('r', '8');
         c.setAttribute('fill', n.color);
@@ -174,31 +213,22 @@ def _render_interactive_graph(entities: list[dict] | None,
         t.textContent = n.label.slice(0, 22);
         g.appendChild(t);
         root.appendChild(g);
-        // Click → detail panel
-        g.addEventListener('click', (ev) => {{
-          ev.stopPropagation();
-          const inLinks = linkMap.filter(l => l.target === n);
-          const outLinks = linkMap.filter(l => l.source === n);
-          const panel = document.getElementById('igraph-panel');
-          panel.innerHTML = `
-            <div style="color:${{n.color}};font-weight:600;margin-bottom:4px;">${{n.type}}</div>
-            <div style="word-break:break-all;color:#e6edf3;font-weight:600;margin-bottom:6px;">${{n.label}}</div>
-            <div style="color:#9ba9b8;font-size:10.5px;margin-top:8px;">
-              ↓ ${{inLinks.length}} incoming · ↑ ${{outLinks.length}} outgoing
-            </div>`;
-          panel.style.display = 'block';
+        // Click / keyboard → detail panel
+        g.addEventListener('click', (ev) => {{ ev.stopPropagation(); showDetail(n); }});
+        g.addEventListener('keydown', (ev) => {{
+          if (ev.key === 'Enter' || ev.key === ' ') {{ ev.preventDefault(); showDetail(n); }}
         }});
-        // Drag
+        // Drag (mouse + touch via Pointer Events)
         let dragging = false;
-        g.addEventListener('mousedown', (ev) => {{
+        g.addEventListener('pointerdown', (ev) => {{
           ev.preventDefault();
           dragging = true;
           n.fixed = true;
+          try {{ g.setPointerCapture(ev.pointerId); }} catch (e) {{}}
         }});
-        document.addEventListener('mouseup', () => {{
-          dragging = false;
-        }});
-        svg.addEventListener('mousemove', (ev) => {{
+        g.addEventListener('pointerup', () => {{ dragging = false; }});
+        document.addEventListener('pointerup', () => {{ dragging = false; }});
+        g.addEventListener('pointermove', (ev) => {{
           if (!dragging) return;
           const rect = svg.getBoundingClientRect();
           const mx = (ev.clientX - rect.left) * (W / rect.width);
@@ -245,7 +275,9 @@ def _render_interactive_graph(entities: list[dict] | None,
           n.vx *= 0.85; n.vy *= 0.85;
           n.x += n.vx; n.y += n.vy;
         }}
-        // Repaint
+        paint();
+      }}
+      function paint() {{
         for (let i = 0; i < linkEls.length; i++) {{
           const l = linkMap[i];
           linkEls[i].setAttribute('x1', l.source.x);
@@ -257,13 +289,19 @@ def _render_interactive_graph(entities: list[dict] | None,
           nodeEls[i].setAttribute('transform', `translate(${{nodes[i].x}},${{nodes[i].y}})`);
         }}
       }}
-      // Run simulation for ~3s then stop (saves CPU)
-      let ticks = 0;
-      const interval = setInterval(() => {{
-        step();
-        ticks++;
-        if (ticks > 250) clearInterval(interval);
-      }}, 16);
+      // Paint the deterministic seed immediately so the graph is visible even
+      // before/without the animation (e.g. static capture, JS-off-ish, slow CPU).
+      paint();
+      // Honour prefers-reduced-motion: skip the ~4s O(n^2) simulation and keep
+      // the seed layout. Also skip it for large graphs where it would churn CPU.
+      if (!reduceMotion && nodes.length <= 220) {{
+        let ticks = 0;
+        const interval = setInterval(() => {{
+          step();
+          ticks++;
+          if (ticks > 250) clearInterval(interval);
+        }}, 16);
+      }}
       // Pan + zoom
       let pan = false, panStart = null;
       svg.addEventListener('mousedown', (ev) => {{
@@ -351,11 +389,28 @@ def render_report(query: Query, result: QueryResult, elapsed_ms: int,
         for h in items:
             sev = h.severity.value
             c, bg = _SEV_COLOR.get(sev, ("#8fa1b3", "#1b2a36"))
-            extra_pre = ""
+            glyph = _SEV_GLYPH.get(sev, "·")
+            # --- expandable extra: producer evidence + raw extra dict.
+            extra_blocks = []
+            if h.evidence:
+                ev_text = "\n".join(f"{k}: {v}" for k, v in h.evidence.items())
+                extra_blocks.append(
+                    f'<pre class="extra evidence"><b>evidence</b>\n{_esc(ev_text[:2000])}</pre>'
+                )
             if h.extra:
-                extra_pre = (
+                extra_blocks.append(
                     f'<pre class="extra">{_esc(json.dumps(h.extra, indent=2, default=str)[:4000])}</pre>'
                 )
+            extra_pre = "".join(extra_blocks)
+            # --- confidence badge + bar (0.0–1.0).
+            conf = h.confidence if h.confidence is not None else 0.0
+            conf_pct = max(0, min(100, round(conf * 100)))
+            conf_html = (
+                f'<div class="conf" title="confidence {conf_pct}%" '
+                f'role="meter" aria-valuenow="{conf_pct}" aria-label="confidence {conf_pct} percent">'
+                f'<div class="conf-bar"><span style="width:{conf_pct}%"></span></div>'
+                f'<span class="conf-pct">{conf_pct}%</span></div>'
+            )
             _safe = _safe_href(h.url)
             if _safe:
                 url_html = (f'<a href="{_esc(_safe)}" target="_blank" rel="noreferrer">'
@@ -364,12 +419,17 @@ def render_report(query: Query, result: QueryResult, elapsed_ms: int,
                 # non-http(s) scheme: show as plain escaped text, never a link
                 url_html = _esc(h.url)[:70] if h.url else ""
             rows.append(
-                f'<tr class="status-{_esc(h.status.value)}">'
+                f'<tr class="status-{_esc(h.status.value)}" '
+                f'data-sev="{_esc(sev)}" data-sevrank="{_SEV_RANK.get(sev, 0)}" '
+                f'data-status="{_esc(h.status.value)}" data-conf="{conf_pct}" '
+                f'data-lat="{_esc(h.latency_ms)}">'
                 f'<td class="sev-cell" style="border-left:3px solid {c}">'
-                f'  <span class="sev-pill" style="color:{c};background:{bg}">{_esc(sev)}</span></td>'
+                f'  <span class="sev-pill" style="color:{c};background:{bg}">'
+                f'<span class="sev-g" aria-hidden="true">{glyph}</span>{_esc(sev)}</span></td>'
                 f'<td class="status">{_esc(_STATUS_DOT.get(h.status.value, "?"))} {_esc(h.status.value)}</td>'
                 f'<td class="source"><b>{_esc(h.source)}</b><br>'
                 f'  <span class="cat">{_esc(h.category or "-")}</span></td>'
+                f'<td class="confidence">{conf_html}</td>'
                 f'<td class="detail">{_esc(h.detail)[:300]}<br>{url_html}{extra_pre}</td>'
                 f'<td class="latency">{_esc(h.latency_ms)} ms</td>'
                 f'</tr>'
@@ -378,8 +438,13 @@ def render_report(query: Query, result: QueryResult, elapsed_ms: int,
             f'<section class="module">'
             f'  <h2><span class="mod-name">{_esc(mod)}</span> '
             f'  <span class="mod-stats">{n_pos} found / {len(items)} probed</span></h2>'
-            f'  <table><thead><tr><th>SEV</th><th>STATUS</th>'
-            f'    <th>SOURCE</th><th>FINDING</th><th>LAT</th></tr></thead>'
+            f'  <table><thead><tr>'
+            f'    <th class="th-sort" data-sort="sev">SEV</th>'
+            f'    <th class="th-sort" data-sort="status">STATUS</th>'
+            f'    <th>SOURCE</th>'
+            f'    <th class="th-sort" data-sort="conf">CONF</th>'
+            f'    <th>FINDING</th>'
+            f'    <th class="th-sort" data-sort="lat">LAT</th></tr></thead>'
             f'  <tbody>{"".join(rows)}</tbody></table>'
             f'</section>'
         )
@@ -464,26 +529,67 @@ def render_report(query: Query, result: QueryResult, elapsed_ms: int,
     border-top:1px solid var(--border); font-size:12.5px; }}
   th {{ color:var(--fg-dim); font-weight:500; font-size:10.5px;
     letter-spacing:.12em; background:var(--panel-2); border-top:0; }}
-  td.sev-cell {{ width:90px; padding-left:14px; }}
+  th.th-sort {{ cursor:pointer; user-select:none; }}
+  th.th-sort:hover {{ color:var(--fg); }}
+  th.th-sort[data-dir]::after {{ content:attr(data-dir); margin-left:4px; opacity:.7; font-size:9px; }}
+  td.sev-cell {{ width:104px; padding-left:14px; }}
   .sev-pill {{ display:inline-block; padding:2px 8px; border-radius:10px;
     font-size:10.5px; letter-spacing:.1em; font-weight:600; text-transform:uppercase; }}
+  .sev-pill .sev-g {{ margin-right:4px; font-style:normal; }}
   td.status {{ width:110px; color:var(--fg-dim); white-space:nowrap; }}
   td.source {{ width:200px; }}
   td.source .cat {{ color:var(--fg-dim); font-size:10.5px; }}
+  td.confidence {{ width:96px; }}
+  .conf .conf-bar {{ height:5px; border-radius:3px; background:#10202e; overflow:hidden; }}
+  .conf .conf-bar span {{ display:block; height:100%; background:var(--accent); }}
+  .conf .conf-pct {{ font-size:10.5px; color:var(--fg-dim); }}
   td.detail {{ word-break:break-word; }}
   td.detail a {{ color:var(--accent); text-decoration:none; }}
   td.detail a:hover {{ text-decoration:underline; }}
   td.latency {{ width:70px; text-align:right; color:var(--fg-dim); }}
   pre.extra {{ margin:8px 0 0; padding:8px 10px; background:#091420;
     border:1px solid var(--border); border-radius:6px; font-size:11.5px;
-    color:var(--fg-dim); max-height:220px; overflow:auto; }}
+    color:var(--fg-dim); max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word; }}
+  pre.extra.evidence b {{ color:var(--accent); }}
   tr.status-found td.detail {{ color:var(--fg); }}
-  tr.status-not_found td, tr.status-no_data td, tr.status-skipped td {{ color:#5e6b78; }}
+  tr.status-not_found td, tr.status-no_data td, tr.status-skipped td {{ color:#7e8a98; }}
+  tr.flt-hidden {{ display:none; }}
+
+  /* report filter toolbar (vanilla JS, no deps) */
+  .toolbar {{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:0 0 4px; }}
+  .toolbar .lbl {{ color:var(--fg-dim); font-size:11px; letter-spacing:.08em; }}
+  .toolbar .chip {{ background:var(--panel-2); color:var(--fg-dim); border:1px solid var(--border);
+    border-radius:14px; padding:3px 11px; font:inherit; font-size:11px; cursor:pointer; }}
+  .toolbar .chip[aria-pressed=true] {{ background:var(--accent); color:var(--bg); border-color:var(--accent); }}
 
   section.graph {{ margin:16px 0; background:var(--panel); border:1px solid var(--border);
     border-radius:12px; padding:8px 12px 12px; }}
   section.graph h2 {{ font-size:13.5px; color:var(--accent); margin:6px 4px 4px; letter-spacing:.06em; }}
   footer {{ color:var(--fg-dim); text-align:center; margin-top:36px; font-size:11px; }}
+
+  /* --- responsive: collapse the 6-col KPI grid + let wide tables scroll --- */
+  @media (max-width:720px) {{
+    .wrap {{ padding:18px 12px 60px; }}
+    .target {{ font-size:21px; }}
+    .kpi-row {{ grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); }}
+    section.module {{ overflow-x:auto; }}
+    table {{ min-width:560px; }}
+    td.source, td.status, td.confidence, td.latency {{ width:auto; }}
+  }}
+
+  /* --- print: light, ink-friendly; drop interactive/animated parts --- */
+  @media print {{
+    :root {{ --bg:#fff; --panel:#fff; --panel-2:#f3f5f7; --border:#cbd3db;
+      --fg:#10161c; --fg-dim:#52606d; --accent:#0b4f8a; }}
+    html,body {{ background:#fff; color:#10161c; -webkit-print-color-adjust:exact; print-color-adjust:exact; }}
+    .wrap {{ max-width:none; padding:0; }}
+    header.hero {{ background:#fff; }}
+    .igraph, section.graph {{ display:none !important; }}
+    section.module, tr {{ break-inside:avoid; page-break-inside:avoid; }}
+    pre.extra {{ max-height:none; overflow:visible; }}
+    .toolbar {{ display:none; }}
+    tr.status-not_found td, tr.status-no_data td, tr.status-skipped td {{ color:#52606d; }}
+  }}
 </style>
 </head>
 <body>
@@ -502,6 +608,13 @@ def render_report(query: Query, result: QueryResult, elapsed_ms: int,
 
   {_render_interactive_graph(entities, edges) if entities else ""}
 
+  <div class="toolbar">
+    <span class="lbl">FILTER</span>
+    <button type="button" class="chip" id="flt-pos" aria-pressed="false">found only</button>
+    <button type="button" class="chip" id="flt-crit" aria-pressed="false">critical + high</button>
+    <span class="lbl" style="margin-left:8px">click a column header to sort</span>
+  </div>
+
   {"".join(sections)}
 
   <footer>
@@ -509,6 +622,41 @@ def render_report(query: Query, result: QueryResult, elapsed_ms: int,
     {_esc(len(by_module))} modules · {_esc(n_total)} hits · {_esc(elapsed_ms)} ms
   </footer>
 </div>
+<script>
+(function() {{
+  var fltPos = false, fltCrit = false;
+  function applyFilters() {{
+    document.querySelectorAll('section.module tbody tr').forEach(function(tr) {{
+      var hide = false;
+      if (fltPos && tr.dataset.status !== 'found') hide = true;
+      if (fltCrit && tr.dataset.sev !== 'critical' && tr.dataset.sev !== 'high') hide = true;
+      tr.classList.toggle('flt-hidden', hide);
+    }});
+  }}
+  var bp = document.getElementById('flt-pos');
+  if (bp) bp.addEventListener('click', function() {{
+    fltPos = !fltPos; bp.setAttribute('aria-pressed', String(fltPos)); applyFilters();
+  }});
+  var bc = document.getElementById('flt-crit');
+  if (bc) bc.addEventListener('click', function() {{
+    fltCrit = !fltCrit; bc.setAttribute('aria-pressed', String(fltCrit)); applyFilters();
+  }});
+  // Per-table column sort.
+  document.querySelectorAll('section.module table th.th-sort').forEach(function(th) {{
+    th.addEventListener('click', function() {{
+      var table = th.closest('table'), tbody = table.querySelector('tbody');
+      var key = th.dataset.sort;
+      var col = key === 'sev' ? 'sevrank' : key;
+      var dir = th.dataset.dir === '▼' ? 1 : -1;  // toggle: desc first
+      table.querySelectorAll('th.th-sort').forEach(function(o) {{ o.removeAttribute('data-dir'); }});
+      th.dataset.dir = dir < 0 ? '▼' : '▲';
+      var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+      rows.sort(function(a, b) {{ return (Number(a.dataset[col]) - Number(b.dataset[col])) * dir; }});
+      rows.forEach(function(r) {{ tbody.appendChild(r); }});
+    }});
+  }});
+}})();
+</script>
 </body>
 </html>
 """
