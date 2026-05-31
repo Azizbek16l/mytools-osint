@@ -148,7 +148,13 @@ class TestInference:
 
     def test_non_image_value_not_classified(self):
         assert infer_kind("https://example.com/page.html") != QueryKind.IMAGE
-        assert infer_kind("not_a_path.jpg") != QueryKind.IMAGE  # relative
+        assert infer_kind("notanimage") != QueryKind.IMAGE  # no image extension
+
+    def test_relative_image_filename_is_image(self):
+        # Canonical inference (WP-D / finding #18): a bare filename ending in an
+        # image extension routes to the IMAGE module, not DOMAIN. The image
+        # module then handles a missing file gracefully (regular-file check).
+        assert infer_kind("not_a_path.jpg") == QueryKind.IMAGE
 
 
 class TestParser:
@@ -211,7 +217,9 @@ class TestRunURL:
         assert "openstreetmap.org" in gps.url
         lens = next(h for h in hits if h.source == "Google Lens")
         assert "lens.google.com" in lens.url
-        assert "https://example.com/x.jpg" in lens.url
+        # WP-C: source URL is percent-encoded before embedding in the pivot.
+        from urllib.parse import quote
+        assert quote("https://example.com/x.jpg", safe="") in lens.url
 
     async def test_url_unreachable_emits_unavailable(self, monkeypatch):
         def handler(req: httpx.Request) -> httpx.Response:

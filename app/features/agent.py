@@ -47,6 +47,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.core.entities import PIVOT_PROFILE, EntityType, canonical_key, entity_id
+from app.core.infer import infer_kind
 from app.core.profiles import PROFILES, apply_profile
 from app.core.runner import Runner
 from app.core.runner import runner as _default_runner
@@ -170,8 +171,54 @@ Rules:
 
 _PLAN_RE = re.compile(r"(?im)^\s*PLAN\s*:\s*(.+?)\s*$")
 _THOUGHT_RE = re.compile(r"(?im)^\s*THOUGHT\s*:\s*(.+?)\s*$")
-_ACTION_RE = re.compile(r"(?im)^\s*ACTION\s*:\s*(\{.*?\})\s*$", re.DOTALL)
+# Match only up to (and including) the ACTION: marker; the JSON object after it
+# is extracted by balancing braces (see _first_json_object) so multi-line /
+# pretty-printed JSON and trailing prose are tolerated.
+_ACTION_MARKER_RE = re.compile(r"(?im)^\s*ACTION\s*:\s*")
 _ANSWER_RE = re.compile(r"(?im)^\s*ANSWER\s*:\s*(.+?)\s*$", re.DOTALL)
+
+
+def _first_json_object(text: str) -> tuple[dict[str, Any] | None, str]:
+    """Extract the first balanced ``{...}`` JSON object from ``text``.
+
+    Walks from the first ``{``, tracking brace depth while honouring string
+    literals and escapes so braces inside strings don't fool the counter.
+    Returns ``(parsed_obj, raw_slice)`` — ``(None, "")`` if no balanced
+    object parses. Trailing text after the closing brace is ignored, so
+    pretty-printed JSON and ``ACTION: {...}  // comment`` both work.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None, ""
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                raw = text[start:i + 1]
+                try:
+                    obj = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    return None, ""
+                if isinstance(obj, dict):
+                    return obj, raw
+                return None, ""
+    return None, ""
 
 
 def _estimate_tokens(text: str) -> int:
@@ -193,17 +240,15 @@ def _parse_step(reply: str) -> tuple[str, str, dict[str, Any] | None, str]:
     """
     if m := _ANSWER_RE.search(reply):
         return "answer", m.group(1).strip(), None, ""
-    if m := _ACTION_RE.search(reply):
-        raw = m.group(1).strip()
-        try:
-            obj = json.loads(raw)
-            if isinstance(obj, dict) and "tool" in obj:
-                args = obj.get("args") or {}
-                if not isinstance(args, dict):
-                    args = {}
-                return "action", obj["tool"], args, raw
-        except (json.JSONDecodeError, TypeError):
-            pass
+    if m := _ACTION_MARKER_RE.search(reply):
+        # Extract the first balanced JSON object after the ACTION: marker —
+        # tolerant of multi-line/pretty-printed JSON and trailing prose.
+        obj, raw = _first_json_object(reply[m.end():])
+        if isinstance(obj, dict) and "tool" in obj:
+            args = obj.get("args") or {}
+            if not isinstance(args, dict):
+                args = {}
+            return "action", str(obj["tool"]), args, raw
     if m := _THOUGHT_RE.search(reply):
         return "thought", m.group(1).strip(), None, ""
     # Unparseable — surface the raw reply as an observation so the loop can
@@ -333,7 +378,10 @@ class AgentLoop:
                     result.status = "budget_exhausted"
                     break
 
-                t_in = sum(_estimate_tokens(m["content"]) for m in messages[-2:])
+                # The provider re-sends the WHOLE transcript each call, so the
+                # input cost grows O(steps). Count the full messages list (not
+                # just the last two) or the max_tokens wall fires far too late.
+                t_in = sum(_estimate_tokens(m["content"]) for m in messages)
                 t_out = _estimate_tokens(reply)
                 tokens_in_total += t_in
                 tokens_out_total += t_out
@@ -483,7 +531,9 @@ class AgentLoop:
         except ValueError as e:
             return json.dumps({"error": str(e)})
         try:
-            result = await self._runner.run(query)
+            # Thread the resolved module set in per-run so a concurrent agent /
+            # scan on the shared singleton Runner can't change our scope mid-run.
+            result = await self._runner.run(query, modules=frozenset(enabled))
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -524,7 +574,7 @@ class AgentLoop:
             return json.dumps({"error": str(e)})
         sub_q = Query(kind=qkind, value=raw_value, note=f"agent-pivot:{eid}")
         try:
-            result = await self._runner.run(sub_q)
+            result = await self._runner.run(sub_q, modules=frozenset(enabled))
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -607,14 +657,29 @@ def _entities_from_hit(h: Hit) -> list[tuple[EntityType, str]]:
     Intentionally conservative — we only mine the source/url fields the
     runner already populates. Heavy NLP belongs upstream in correlation.
     """
+    import ipaddress
+
     out: list[tuple[EntityType, str]] = []
     src = (h.source or "").strip()
-    if src and "@" in src and "." in src:
+    if not src:
+        return out
+    if "@" in src and "." in src:
         out.append((EntityType.EMAIL, src))
-    elif src and "." in src and " " not in src:
+        return out
+    # IP-first (mirror infer.py ordering): an IP literal like `1.2.3.4` would
+    # otherwise be classified as DOMAIN, and PIVOT_PROFILE[DOMAIN] runs DNS /
+    # subdomain recon — which is meaningless against a raw IP. Strip a CIDR
+    # suffix before parsing so `1.2.3.4/24` still resolves to IP.
+    try:
+        ipaddress.ip_address(src.split("/", 1)[0])
+        out.append((EntityType.IP, src))
+        return out
+    except ValueError:
+        pass
+    if "." in src and " " not in src:
         # Looks like a host or domain.
         out.append((EntityType.DOMAIN, src))
-    elif src and not any(c in src for c in " /:@"):
+    elif not any(c in src for c in " /:@"):
         # Bare token — treat as username.
         out.append((EntityType.USERNAME, src))
     return out
@@ -623,33 +688,6 @@ def _entities_from_hit(h: Hit) -> list[tuple[EntityType, str]]:
 # --------------------------------------------------------------------------- #
 # CLI entrypoint — wired from cli.py
 # --------------------------------------------------------------------------- #
-
-def _infer_kind_for_cli(value: str) -> QueryKind:
-    """Inline the lightweight kind inference so we don't import cli.py (cycle)."""
-    import ipaddress
-    v = value.strip()
-    try:
-        ipaddress.ip_address(v.split("/", 1)[0])
-        return QueryKind.IP
-    except ValueError:
-        pass
-    if re.match(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$", v):
-        return QueryKind.EMAIL
-    if re.match(r"^[a-fA-F0-9]+$", v) and len(v) in (32, 40, 64, 128):
-        return QueryKind.HASH
-    digits = re.sub(r"\D", "", v)
-    if re.match(r"^\+?[0-9 ()\-]{6,}$", v) and 6 <= len(digits) <= 16:
-        return QueryKind.PHONE
-    if v.startswith("@"):
-        return QueryKind.USERNAME
-    if "." in v and re.match(
-        r"^[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?"
-        r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)+$",
-        v,
-    ):
-        return QueryKind.DOMAIN
-    return QueryKind.USERNAME
-
 
 async def _interactive_approve(plan: str, *, timeout_s: float = 5.0) -> bool:
     """CLI default approver — print the plan, ask y/N, fall back to reject.
@@ -694,7 +732,7 @@ async def _run_agent(target: str, *, no_approve: bool) -> int:
 
     from app.core.config import load_settings
     load_settings()
-    kind = _infer_kind_for_cli(target)
+    kind = infer_kind(target) or QueryKind.USERNAME
     query = Query(kind=kind, value=target)
 
     loop = AgentLoop()

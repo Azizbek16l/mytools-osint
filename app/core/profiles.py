@@ -9,6 +9,8 @@ override individual modules.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from app.core.runner import Runner
 
 # A "Tier A" probe = always fast, always informative, never noisy.
@@ -132,6 +134,36 @@ def apply_profile(runner: Runner, profile: str) -> tuple[set[str], set[str]]:
             runner.set_enabled(m.name, False)
             disabled.add(m.name)
     return enabled, disabled
+
+
+def all_referenced_modules() -> set[str]:
+    """Every module name referenced by any profile (the union across PROFILES).
+
+    Derived from the registry of profile sets rather than hand-maintained, so
+    it can't drift from PROFILES itself.
+    """
+    out: set[str] = set()
+    for mods in PROFILES.values():
+        out |= set(mods)
+    return out
+
+
+def profile_drift(registered_modules: Iterable[str]) -> set[str]:
+    """Names referenced by PROFILES that don't exist in the registered set.
+
+    ``apply_profile`` silently drops a typo'd profile name (it only toggles
+    names that ARE registered), so a misspelling like ``ssl_tsl`` would never
+    fire and never warn. This is the one-shot validation a dev/CI check calls
+    to fail loud:
+
+        >>> from app.core.runner import runner
+        >>> profile_drift(m.name for m in runner().all_modules())
+        set()
+
+    Returns the empty set when every profile reference resolves.
+    """
+    registered = set(registered_modules)
+    return all_referenced_modules() - registered
 
 
 def list_profiles() -> list[tuple[str, int, list[str]]]:

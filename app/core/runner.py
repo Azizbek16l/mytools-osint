@@ -13,7 +13,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from .config import settings
 from .types import Hit, HitStatus, Query, QueryKind, QueryResult, Severity
 
 logger = logging.getLogger("osint.runner")
@@ -44,7 +43,18 @@ class Runner:
     ) -> None:
         self._modules.append(ModuleEntry(name=name, kinds=frozenset(kinds), producer=producer))
 
-    def modules_for(self, kind: QueryKind) -> list[ModuleEntry]:
+    def modules_for(
+        self, kind: QueryKind, *, only: frozenset[str] | None = None
+    ) -> list[ModuleEntry]:
+        """Modules that handle ``kind``.
+
+        When ``only`` is given, selection is per-call: a module is included
+        iff its name is in ``only`` (ignoring the global ``enabled`` flag).
+        When ``only`` is None we fall back to the process-global ``enabled``
+        default — the historical behaviour.
+        """
+        if only is not None:
+            return [m for m in self._modules if m.name in only and kind in m.kinds]
         return [m for m in self._modules if m.enabled and kind in m.kinds]
 
     def all_modules(self) -> list[ModuleEntry]:
@@ -59,23 +69,39 @@ class Runner:
         self,
         query: Query,
         on_hit: Callable[[Hit], Awaitable[None]] | None = None,
+        *,
+        modules: frozenset[str] | None = None,
     ) -> QueryResult:
-        """Dispatch query to all matching modules. Streams hits via on_hit as they arrive."""
-        s = settings()
-        sem = asyncio.Semaphore(s.http_concurrency)
+        """Dispatch query to all matching modules. Streams hits via on_hit as they arrive.
+
+        Concurrency model (was a latent bug): HTTP fan-out is bounded by each
+        module's OWN per-module gate (``base.py`` builds an
+        ``asyncio.Semaphore(settings().http_concurrency)`` per module). The
+        runner used to wrap only ``result.hits.append`` in a semaphore, which
+        bounded nothing network-side (the append is in-process and cheap) — it
+        was dead weight. We removed it; the append happens inline. If a single
+        global HTTP cap across modules is ever required, thread a shared
+        semaphore into the module signatures (and document it in
+        ``http.get_client``); today the per-module gate is the contract.
+
+        ``modules`` (optional) is a per-RUN scope override: only modules whose
+        name is in this set run, regardless of the global ``enabled`` flag.
+        This makes scope a per-call value so overlapping scans on the shared
+        singleton Runner can't corrupt each other's module selection. When
+        omitted, the global ``enabled`` default is used (back-compat).
+        """
         result = QueryResult(query=query)
         started = time.perf_counter()
 
         async def collect(entry: ModuleEntry) -> None:
             try:
                 async for hit in entry.producer(query):
-                    async with sem:
-                        result.hits.append(hit)
-                        if on_hit:
-                            try:
-                                await on_hit(hit)
-                            except Exception:
-                                logger.debug("on_hit callback failed for %s", entry.name, exc_info=True)
+                    result.hits.append(hit)
+                    if on_hit:
+                        try:
+                            await on_hit(hit)
+                        except Exception:
+                            logger.debug("on_hit callback failed for %s", entry.name, exc_info=True)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -93,13 +119,13 @@ class Runner:
                     except Exception:
                         logger.debug("on_hit callback failed for %s (error hit)", entry.name, exc_info=True)
 
-        modules = self.modules_for(query.kind)
-        if not modules:
+        modules_to_run = self.modules_for(query.kind, only=modules)
+        if not modules_to_run:
             return result
 
         try:
             async with asyncio.TaskGroup() as tg:
-                for m in modules:
+                for m in modules_to_run:
                     tg.create_task(collect(m), name=f"osint:{m.name}")
         except* asyncio.CancelledError:
             # Cooperative cancel — siblings already torn down by TaskGroup.

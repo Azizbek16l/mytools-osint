@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from app.core.entities import (
     Edge,
@@ -275,6 +275,29 @@ _DERIVERS: dict[str, Callable[[Query, Hit, int | None], tuple[list[Entity], list
     "tor_check":     _derive_tor,
     "malware_bazaar":_derive_malware_bazaar,
 }
+
+
+# Modules the central engine has a *custom* deriver for. Everything else is
+# intentionally handled by `_fallback_derive` (the generic regex path) — so a
+# module without a bespoke deriver is NOT a bug, it's the default.
+KNOWN_DERIVER_MODULES: frozenset[str] = frozenset(_DERIVERS)
+
+
+def derivers_drift(registered_modules: Iterable[str]) -> set[str]:
+    """Return deriver names that no longer match any registered module.
+
+    The core can't enumerate every probe module (features register them), so
+    rather than hard-coding "13 of 32" we derive the drift from the live
+    registry: any key in ``_DERIVERS`` that isn't a registered module name is
+    stale (a module was renamed/removed but its deriver lingered). Modules
+    *without* a custom deriver are fine — they fall back to the generic path —
+    so we deliberately do NOT flag the reverse direction.
+
+    Call this from a CI/dev drift-guard (see tests) to fail loud when a rename
+    silently orphans a deriver.
+    """
+    registered = set(registered_modules)
+    return {name for name in _DERIVERS if name not in registered}
 
 
 def _fallback_derive(query: Query, hit: Hit, hit_id: int | None) -> tuple[list[Entity], list[Edge]]:

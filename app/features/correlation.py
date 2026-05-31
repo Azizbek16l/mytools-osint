@@ -324,30 +324,63 @@ async def _run_entities_match(
 # ---- predicate: cross_kind ------------------------------------------------
 
 
+def _parse_cross_kind_rel(item: Any) -> tuple[str, str] | None:
+    """Normalise one ``rels`` entry into ``(rel_name, end)``.
+
+    Back-compat: a plain string ``"mx_for"`` → ``("mx_for", "both")`` (an
+    entity counts if it's on EITHER end). The richer form
+    ``{rel: "mx_for", end: "src"}`` restricts the qualifying endpoint so a
+    high-fanout node (e.g. an apex that is the ``dst`` of every
+    ``subdomain_of`` edge) doesn't spuriously satisfy the rule. ``end`` must
+    be one of ``src`` / ``dst`` / ``both`` (default ``both``).
+    """
+    if isinstance(item, str):
+        name = item.strip()
+        return (name, "both") if name else None
+    if isinstance(item, dict):
+        name = str(item.get("rel") or "").strip()
+        if not name:
+            return None
+        end = str(item.get("end") or "both").strip().lower()
+        if end not in ("src", "dst", "both"):
+            end = "both"
+        return name, end
+    return None
+
+
 async def _run_cross_kind_match(
     db: Database, rule: Rule, spec: dict[str, Any], case_id: int | None
 ) -> list[Hit]:
-    """Emit hits for entities that have BOTH of the named relations (incoming
-    or outgoing — direction-agnostic, matching SpiderFoot's notion of "tagged
-    with two facts").
+    """Emit hits for entities that satisfy BOTH of the named relations.
+
+    Each ``rels`` entry is either a bare relation name (direction-agnostic —
+    the entity counts on either end, matching SpiderFoot's "tagged with two
+    facts") or ``{rel: <name>, end: src|dst|both}`` to pin the qualifying
+    endpoint. Pinning the end fixes the false positive where a high-degree
+    ``dst`` node (apex of many ``subdomain_of`` edges) qualified merely by
+    appearing on either end of a second relation.
     """
     rels = spec.get("rels") or []
     if not isinstance(rels, list) or len(rels) < 2:
         return []
-    rels_s = [str(r).strip() for r in rels if r]
-    if len(rels_s) < 2:
+    parsed = [p for p in (_parse_cross_kind_rel(r) for r in rels) if p is not None]
+    if len(parsed) < 2:
         return []
+    rels_s = [name for name, _ in parsed]
     assert db._conn is not None
-    # Pull all entity ids that have at least one of each rel.
+    # Pull qualifying entity ids per (rel, end). For end=src we only count
+    # src_id; for end=dst only dst_id; for both, either.
     by_rel: list[set[str]] = []
-    for rel in rels_s:
+    for rel, end in parsed:
         async with db._conn.execute(
             "SELECT src_id, dst_id FROM edges WHERE rel = ?", (rel,)
         ) as cur:
             ids: set[str] = set()
             for r in await cur.fetchall():
-                ids.add(r["src_id"])
-                ids.add(r["dst_id"])
+                if end in ("src", "both"):
+                    ids.add(r["src_id"])
+                if end in ("dst", "both"):
+                    ids.add(r["dst_id"])
             by_rel.append(ids)
     common = set.intersection(*by_rel) if by_rel else set()
     if case_id is not None:

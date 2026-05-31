@@ -343,18 +343,20 @@ def _resolve_run_target(
     if not val:
         return None, None
     if isinstance(val, Hit):
-        # Default to that hit's URL.
-        return None, val.url or None
+        # Default to that hit's URL, but fall back to any host-bearing field so
+        # a urlless FOUND hit (e.g. domain.py's `DNS:A` hits, which set title
+        # but no url) doesn't silently skip the step.
+        return None, (val.url or val.title or val.source or None)
     if isinstance(val, str):
         return None, val
     return None, None
 
 
 def _infer_kind_from_value(v: str) -> QueryKind:
-    # Cheap inference — we already have cli.infer_kind but importing CLI
-    # here would create a cycle. Reuse a tiny version.
-    from cli import infer_kind  # local import, breaks cycle
-    return infer_kind(v)
+    # Single canonical inference lives in app.core.infer; importing it (not
+    # cli.py) avoids the CLI/feature layering inversion + import cycle.
+    from app.core.infer import infer_kind  # local import keeps load cheap
+    return infer_kind(v) or QueryKind.USERNAME
 
 
 async def run_playbook(
@@ -456,7 +458,7 @@ async def run_playbook(
                 continue
         elif step.run in PROFILES:
             try:
-                apply_profile(r, step.run)
+                enabled, _ = apply_profile(r, step.run)
             except ValueError as exc:
                 pb_result.steps.append(StepResult(
                     step_id=step.id, run=step.run, skipped=True,
@@ -465,9 +467,11 @@ async def run_playbook(
                 _emit("error", f"step {step.id}: {exc}")
                 continue
             _emit("info", f"step {step.id}: profile={step.run} target={step_query.value}")
-            qr = await r.run(step_query)
+            # Per-run scope so a concurrent run on the shared Runner can't change
+            # this step's module set mid-flight.
+            qr = await r.run(step_query, modules=frozenset(enabled))
         else:
-            # Treat ``run`` as a single module name. Enable only that module.
+            # Treat ``run`` as a single module name. Scope the run to just it.
             mods = {m.name for m in r.all_modules()}
             if step.run not in mods:
                 pb_result.steps.append(StepResult(
@@ -476,10 +480,8 @@ async def run_playbook(
                 ))
                 _emit("error", f"step {step.id}: unknown {step.run!r}")
                 continue
-            for m in r.all_modules():
-                r.set_enabled(m.name, m.name == step.run)
             _emit("info", f"step {step.id}: module={step.run} target={step_query.value}")
-            qr = await r.run(step_query)
+            qr = await r.run(step_query, modules=frozenset({step.run}))
 
         cumulative_hits.extend(qr.hits)
         if db is not None:

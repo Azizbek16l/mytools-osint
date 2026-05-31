@@ -166,6 +166,20 @@ class Case:
 # ---------------------------------------------------------------------------
 
 
+def _root_entity_id(query_result: QueryResult) -> str | None:
+    """Entity id of the query root, or None if this kind has no root entity.
+
+    Reuses the correlation engine's kind→type mapping + id derivation so the
+    id we INSERT into case_entities matches exactly what ``correlate_query``
+    upserts (otherwise the existence check would never hit). PASSWORD queries
+    map to None (we never store passwords as entities).
+    """
+    from app.core.correlation import _query_root_entity
+
+    root = _query_root_entity(query_result.query)
+    return root.id if root is not None else None
+
+
 def _row_to_case(row: dict[str, Any]) -> Case:
     return Case(
         id=int(row["id"]),
@@ -370,21 +384,35 @@ async def _attach_run_impl(
 
     # Ingest the entity ids this query produced into case_entities. We pull
     # them from the edges table — that's the same source of truth pivot uses,
-    # and it gives us the discovered union (root + everything derived).
+    # and it gives us the discovered union (everything derived as an edge).
     async with db._conn.execute(
         """SELECT DISTINCT e.id FROM entities e
            JOIN edges ed ON ed.dst_id = e.id OR ed.src_id = e.id
            WHERE ed.hit_id IN (SELECT id FROM hits WHERE query_id = ?)""",
         (qid,),
     ) as ecur:
-        ent_ids = [r["id"] for r in await ecur.fetchall()]
+        ent_ids = {r["id"] for r in await ecur.fetchall()}
+
+    # The edge-join misses root-only entities: some derivers emit the query
+    # root with NO edges (e.g. internetdb against a non-IP, or the generic
+    # fallback when no sub-entity is extractable). correlate_query still
+    # upsert()s that root into `entities`, so link it directly here — but only
+    # if it actually exists (it won't for PASSWORD queries, which have no root
+    # entity, or when no FOUND hit produced one).
+    root_id = _root_entity_id(query_result)
+    if root_id is not None:
+        async with db._conn.execute(
+            "SELECT 1 FROM entities WHERE id = ? LIMIT 1", (root_id,)
+        ) as rcur:
+            if await rcur.fetchone() is not None:
+                ent_ids.add(root_id)
 
     if ent_ids:
         now = _now()
         await db._conn.executemany(
             """INSERT OR IGNORE INTO case_entities (case_id, entity_id, first_seen)
                VALUES (?, ?, ?)""",
-            [(case.id, eid, now) for eid in ent_ids],
+            [(case.id, eid, now) for eid in sorted(ent_ids)],
         )
 
     await db._conn.execute(

@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import time
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 import tldextract
 
@@ -64,6 +65,38 @@ def _apex(value: str) -> str:
     except Exception:
         pass
     return v
+
+
+def _host_apexes(value: str) -> set[str]:
+    """Apex (registrable) domains for every host-looking token in ``value``.
+
+    Used to compare a ransomware victim record against the target apex by
+    *exact registrable-domain equality* rather than a naive substring — so
+    ``acme.io`` does NOT match ``notacme.io`` or ``acme.io.evil.com`` and a
+    free-text post title like ``acme.io leaked db`` only matches when the
+    token's apex equals the target apex.
+    """
+    out: set[str] = set()
+    text = (value or "").strip().lower()
+    if not text:
+        return out
+    # Tokenise on whitespace + common separators that aren't valid in a host.
+    for tok in re.split(r"[\s,;|<>\"'()\[\]{}]+", text):
+        tok = tok.strip()
+        if not tok:
+            continue
+        # If the token looks like a URL, pull its netloc; else use it directly.
+        if "://" in tok:
+            host = urlparse(tok).hostname or ""
+        else:
+            # strip a leading scheme-less path / userinfo and any port.
+            host = tok.split("/", 1)[0].split("@")[-1].split(":", 1)[0]
+        if not host or "." not in host:
+            continue
+        apex = _apex(host)
+        if apex and "." in apex:
+            out.add(apex)
+    return out
 
 
 # ---- Pastebin --------------------------------------------------------------
@@ -237,10 +270,14 @@ async def _ransomware_live(target: str) -> AsyncIterator[Hit]:
     for v in victims:
         if not isinstance(v, dict):
             continue
-        # Compare against any field that plausibly holds a victim name/domain.
-        candidates = " ".join(str(v.get(k, "")) for k in (
-            "victim", "post_title", "title", "url", "domain")).lower()
-        if apex and apex in candidates:
+        # Compare on EXACT registrable-domain (apex) equality, not substring:
+        # `acme.io` must not match `notacme.io`, `acme.io.evil.com`, or a
+        # free-text `realacme.io competitor` mention. We extract the apex of
+        # every host-looking token across the fields that plausibly hold a
+        # victim name/domain, then require apex ∈ that set.
+        blob = " ".join(str(v.get(k, "")) for k in (
+            "victim", "post_title", "title", "url", "domain"))
+        if apex in _host_apexes(blob):
             matches.append(v)
     if not matches:
         yield Hit(module=NAME, source="ransomware.live", category="leak",

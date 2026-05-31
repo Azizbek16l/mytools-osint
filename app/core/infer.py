@@ -1,12 +1,34 @@
 """Query-kind inference — pure logic (no Qt, no network).
 
+This module is the SINGLE canonical home for query-kind inference. cli.py,
+the interactive shell, the agent loop, playbooks and the AI/YAML helpers all
+route through :func:`infer_kind` so the routing decision (e.g. "is this a
+wallet, an image, a hash, or a username?") is made in exactly one place.
+
 Extracted from app.ui.main_window so it can be imported (and unit-tested)
 without pulling in the optional PySide6 GUI dependency.
+
+Ordering rationale (each branch must run BEFORE the ones it could be
+mis-swallowed by):
+
+  IP   → before DOMAIN/USERNAME (IPv6 ``2001:db8::1`` otherwise → USERNAME).
+  EMAIL
+  WALLET → before USERNAME (an ETH ``0x…`` address must not trigger the
+           1000-site username probe blast).
+  HASH → before PHONE/DOMAIN/USERNAME (a 32/40/64/128-char hex string is an
+         IOC, not a username; checked before PHONE because a 32-hex string is
+         all "digits-ish").
+  IMAGE → before DOMAIN (a relative ``photo.jpg`` ends in an image extension
+          and would otherwise be accepted as a ``name.tld`` domain and routed
+          at the image module — which expects a fetchable/readable path).
+  PHONE
+  USERNAME (@-prefixed)
+  DOMAIN
+  USERNAME (bare token / fallback)
 """
 from __future__ import annotations
 
 import ipaddress
-import os
 import re
 
 from app.core.types import QueryKind
@@ -25,27 +47,53 @@ _BTC_BASE58_RE = re.compile(r"^[13][1-9A-HJ-NP-Za-km-z]{25,34}$")
 _BTC_BECH32_RE = re.compile(r"^bc1[0-9ac-hj-np-z]{6,87}$", re.IGNORECASE)
 _ETH_ADDR_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
+# IOC hash — md5(32) / sha1(40) / sha256(64) / sha512(128) hex digests.
+_HASH_RE = re.compile(r"^[a-fA-F0-9]+$")
+_HASH_LENGTHS = (32, 40, 64, 128)
+
 # Image: http(s) URL OR a filesystem path that ends in a common image extension.
 _IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".heic", ".tif", ".tiff")
 _IMG_URL_RE = re.compile(r"^https?://\S+\.(?:jpg|jpeg|png|webp|heic|tiff?)(?:\?.*)?$",
                          re.IGNORECASE)
 
 
+def _is_hash(value: str) -> bool:
+    """True for a bare hex IOC digest of a recognised length (md5/sha*)."""
+    return bool(_HASH_RE.match(value)) and len(value) in _HASH_LENGTHS
+
+
 def _looks_like_image(value: str) -> bool:
+    """True if ``value`` is an image — by URL, by absolute path, or by a
+    bare/relative path ending in a known image extension.
+
+    NOTE on relative paths: a value like ``photo.jpg`` (no separator, not a
+    URL) ends in an image extension and must be treated as an IMAGE so it
+    reaches the image module rather than being swallowed by the DOMAIN regex
+    (which happily accepts ``.jpg`` as a TLD). We require the value NOT look
+    like a URL with a non-image path so ``https://example.com/page.html`` is
+    not pulled in here.
+    """
     if _IMG_URL_RE.match(value):
         return True
-    # absolute filesystem path with image extension (POSIX or Windows-style)
     lower = value.lower()
     if not lower.endswith(_IMG_EXTS):
         return False
-    if os.path.isabs(value):
-        return True
-    # Windows drive-letter absolute paths (e.g. C:\photos\x.jpg) — os.path.isabs
-    # already covers these on Windows; on POSIX accept the pattern explicitly.
-    return bool(re.match(r"^[A-Za-z]:[\\/]", value))
+    # An http(s) URL that ends in an image extension already matched above; any
+    # other URL-shaped value ending in an image ext (e.g. ftp://) we leave to
+    # the URL handlers — only treat *non-URL* values (paths, bare filenames)
+    # as image inputs here.
+    if "://" in value:
+        return False
+    return True
 
 
 def infer_kind(value: str) -> QueryKind | None:
+    """Infer the :class:`QueryKind` of ``value``.
+
+    Returns ``None`` only for empty/whitespace input. Every other input
+    resolves to a kind (falling back to USERNAME) — this keeps the contract
+    backward-compatible with cli.infer_kind, which never returns None.
+    """
     v = value.strip()
     if not v:
         return None
@@ -61,6 +109,12 @@ def infer_kind(value: str) -> QueryKind | None:
     # ETH address (0x…) doesn't fall through to a 1000-site username probe.
     if _ETH_ADDR_RE.match(v) or _BTC_BECH32_RE.match(v) or _BTC_BASE58_RE.match(v):
         return QueryKind.WALLET
+    # Hash IOC — before PHONE (a 32-hex string is all "digits-ish") and before
+    # DOMAIN/USERNAME. ETH 0x… already returned WALLET above.
+    if _is_hash(v):
+        return QueryKind.HASH
+    # Image — before DOMAIN so a relative `photo.jpg` is routed to the image
+    # module instead of being accepted as a `name.tld` domain.
     if _looks_like_image(v):
         return QueryKind.IMAGE
     digits = re.sub(r"\D", "", v)
