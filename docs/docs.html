@@ -5,9 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>docs · mytools-osint</title>
 <meta name="description" content="Documentation for mytools-osint — install, CLI reference, modules, profiles, OPSEC, entity graph, AI, SIEM exporters." />
+<link rel="canonical" href="https://cyber.bluetm.uz/docs.html" />
+
+<!-- Open Graph / Twitter -->
+<meta property="og:title" content="docs · mytools-osint" />
+<meta property="og:description" content="Install, CLI reference, 47 modules, profiles, OPSEC, entity graph, AI, SIEM exporters." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://cyber.bluetm.uz/docs.html" />
+<meta property="og:image" content="https://cyber.bluetm.uz/og-image.svg" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="https://cyber.bluetm.uz/og-image.svg" />
+
+<!-- Favicons (shared with the landing page) -->
+<link rel="icon" type="image/svg+xml" href="https://cyber.bluetm.uz/favicon.svg" />
+<link rel="apple-touch-icon" href="https://cyber.bluetm.uz/favicon.svg" />
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap" rel="stylesheet">
+<!--
+  NOTE (CSP): Tailwind is loaded from the runtime CDN below, which evaluates
+  inline config + injects <style> at runtime (needs 'unsafe-inline'/'unsafe-eval').
+  For production, prebuild a purged Tailwind stylesheet, drop this <script>, and
+  serve a strict CSP as an HTTP header at the edge, e.g.:
+    Content-Security-Policy: default-src 'self'; img-src 'self' data:;
+      font-src https://fonts.gstatic.com; style-src 'self' https://fonts.googleapis.com;
+      script-src 'self'
+-->
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
 tailwind.config = {
@@ -16,7 +40,8 @@ tailwind.config = {
       fontFamily: { mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'] },
       colors: {
         bg:'#0D1117', panel:'#161B22', line:'#21262D',
-        fg:'#C9D1D9', dim:'#6E7681', accent:'#58A6FF',
+        /* dim must clear WCAG AA 4.5:1 on #0D1117 → #8B949E ≈ 6.15:1 (was #6E7681 = 4.12:1) */
+        fg:'#C9D1D9', dim:'#8B949E', accent:'#58A6FF',
         ok:'#3FB950', warn:'#D29922', bad:'#F85149',
       },
     }
@@ -42,12 +67,20 @@ tailwind.config = {
   .cursor::after { content:"█"; color:#58A6FF; animation: blink 1.1s steps(1,end) infinite; margin-left:.05em; }
   @keyframes blink { 50% { opacity: 0 } }
 
+  /* Grid items default to min-width:auto, which lets long <pre>/tables widen
+     the column past a phone viewport. Pin to 0 so the column tracks the grid. */
+  .toc, .prose { min-width: 0; }
+  /* Wide tables scroll within the article instead of blowing out the page. */
+  .prose table { display: block; overflow-x: auto; }
+
   /* Article typography */
   .prose h2 { scroll-margin-top: 6rem; }
   .prose pre { background: #161B22; border: 1px solid #21262D; padding: 1rem 1.25rem; overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
   .prose code { background: rgba(88,166,255,0.08); border: 1px solid #21262D; padding: 1px 5px; font-size: 0.92em; color: #C9D1D9; }
   .prose pre code { background: transparent; border: 0; padding: 0; font-size: inherit; color: inherit; }
   .prose p { line-height: 1.75; color: #C9D1D9; }
+  /* Long unbreakable URLs/inline code must wrap, not push the page sideways. */
+  .prose p, .prose li, .prose a { overflow-wrap: anywhere; }
   .prose ul { margin-left: 0; list-style: none; }
   .prose ul li { position: relative; padding-left: 1.25rem; margin: 0.4rem 0; line-height: 1.65; }
   .prose ul li::before { content:"▸"; color:#58A6FF; position:absolute; left: 0; }
@@ -57,7 +90,7 @@ tailwind.config = {
 
   /* Code syntax tints */
   .term .p { color:#58A6FF; }
-  .term .c { color:#6E7681; }
+  .term .c { color:#8B949E; }
   .term .g { color:#3FB950; }
   .term .r { color:#F85149; }
   .term .w { color:#D29922; }
@@ -73,6 +106,13 @@ tailwind.config = {
   .callout-bad  { border-color: #F85149; }
   .callout-ok   { border-color: #3FB950; }
   .callout > strong { color: #C9D1D9; }
+
+  /* Honour prefers-reduced-motion: stop the blinking cursor + smooth scroll */
+  @media (prefers-reduced-motion: reduce) {
+    .cursor::after { animation: none; }
+    a.flip { transition: none; }
+    html { scroll-behavior: auto; }
+  }
 </style>
 </head>
 
@@ -81,13 +121,13 @@ tailwind.config = {
 <!-- ═════ NAV ═════ -->
 <nav class="sticky top-0 z-30 bg-bg/85 backdrop-blur-md border-b border-line">
   <div class="max-w-7xl mx-auto px-5 sm:px-8 py-3.5 flex items-center gap-4">
-    <a href="./index.html" class="flex items-center gap-2.5 text-fg font-bold tracking-tight">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#58A6FF" stroke-width="1.5">
+    <a href="./index.html" class="flex items-center gap-2.5 text-fg font-bold tracking-tight" aria-label="mytools-osint — home">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#58A6FF" stroke-width="1.5" aria-hidden="true" focusable="false">
         <path d="M3 4h6v6H3zM15 4h6v6h-6zM3 14h6v6H3zM15 14h6v6h-6z"/>
         <path d="M12 7v10M7 12h10" stroke="#58A6FF" stroke-width="1"/>
       </svg>
       <span>mytools-osint</span>
-      <span class="hidden sm:inline ml-1 px-1.5 py-0.5 text-[10px] font-medium text-accent border border-line bg-panel">v4.2.2</span>
+      <span class="hidden sm:inline ml-1 px-1.5 py-0.5 text-[10px] font-medium text-accent border border-line bg-panel">v4.3.2</span>
       <span class="hidden sm:inline ml-2 text-dim text-xs">/ docs</span>
     </a>
     <div class="ml-auto hidden md:flex items-center gap-1 text-sm text-dim">
@@ -95,13 +135,13 @@ tailwind.config = {
       <span class="text-line">│</span>
       <a href="./index.html#install" class="flip px-3 py-1.5">install</a>
       <span class="text-line">│</span>
-      <a href="https://github.com/Azizbek16l/mytools-osint" target="_blank" rel="noopener" class="flip px-3 py-1.5">github</a>
+      <a href="https://github.com/Azizbek16l/mytools-osint" target="_blank" rel="noopener" class="flip px-3 py-1.5" aria-label="github (opens in a new tab)">github</a>
     </div>
   </div>
 </nav>
 
 <!-- ═════ MAIN: SIDEBAR + ARTICLE ═════ -->
-<div class="max-w-7xl mx-auto px-5 sm:px-8 py-12 grid gap-12 lg:grid-cols-[16rem_minmax(0,1fr)]">
+<div class="max-w-7xl mx-auto px-5 sm:px-8 py-12 grid gap-12 grid-cols-1 lg:grid-cols-[16rem_minmax(0,1fr)]">
 
   <!-- TOC sidebar -->
   <aside class="toc lg:sticky lg:top-20 lg:self-start text-sm">
@@ -133,7 +173,7 @@ tailwind.config = {
     <header class="mb-12">
       <div class="text-xs text-accent uppercase tracking-widest">documentation</div>
       <h1 class="text-3xl sm:text-4xl font-bold mt-3 leading-tight">mytools-osint <span class="text-dim">/</span> reference</h1>
-      <p class="mt-4 text-sm text-dim">Updated for <span class="text-fg">v4.2.2</span>. Authorised security testing only.</p>
+      <p class="mt-4 text-sm text-dim">Updated for <span class="text-fg">v4.3.2</span>. Authorised security testing only.</p>
     </header>
 
     <!-- ═════ 01 INSTALL ═════ -->
@@ -143,7 +183,7 @@ tailwind.config = {
 
       <h3 class="text-lg text-accent mt-7 mb-3">macOS + Linux (one-liner)</h3>
       <pre><span class="text-dim">$</span> curl -fsSL https://raw.githubusercontent.com/Azizbek16l/mytools-osint/main/scripts/install.sh | bash</pre>
-      <p class="text-sm text-dim">Pin a version with <code>OSINT_VERSION=v4.2.2</code>; pick a different install dir with <code>OSINT_INSTALL_DIR=~/bin</code>.</p>
+      <p class="text-sm text-dim">Pin a version with <code>OSINT_VERSION=v4.3.2</code>; pick a different install dir with <code>OSINT_INSTALL_DIR=~/bin</code>.</p>
 
       <h3 class="text-lg text-accent mt-7 mb-3">Windows (PowerShell, one-liner)</h3>
       <pre><span class="text-dim">PS&gt;</span> irm https://raw.githubusercontent.com/Azizbek16l/mytools-osint/main/scripts/install.ps1 | iex</pre>
@@ -174,7 +214,7 @@ tailwind.config = {
     <!-- ═════ 02 QUICKSTART ═════ -->
     <section id="quickstart" class="mb-16">
       <h2 class="text-2xl font-bold">02 · quickstart</h2>
-      <p class="mt-4">Run <code>osint</code> with no arguments — the interactive shell opens. Single-fire keys: press <code>l</code> for a new lookup, <code>i</code> for help, <code>q</code> to exit. No Enter required.</p>
+      <p class="mt-4">Run <code>osint</code> with no arguments — it opens straight into a persistent, Claude-Code-style chat prompt (no menu). Type a target and press Enter to scan; the prompt returns when the scan completes. Tab completes targets, slash commands, and history; <code>→</code> accepts the ghost-text suggestion. Slash commands handle navigation: <code>/help</code>, <code>/modules</code>, <code>/profile &lt;name&gt;</code>, <code>/graph</code>, <code>/theme</code>, <code>/quit</code>. Prefer the old menu-driven shell? Launch with <code>--classic</code>.</p>
 
       <h3 class="text-lg text-accent mt-7 mb-3">First scan</h3>
       <pre><span class="text-dim">$</span> osint github.com</pre>
@@ -270,7 +310,7 @@ tailwind.config = {
     <!-- ═════ 04 MODULES ═════ -->
     <section id="modules" class="mb-16">
       <h2 class="text-2xl font-bold">04 · modules</h2>
-      <p class="mt-4">45 modules across passive + active recon. Run <code>osint --list-modules</code> for the live registry with health + 7-day sparkline.</p>
+      <p class="mt-4">47 modules across passive + active recon. Run <code>osint --list-modules</code> for the live registry with health + 7-day sparkline.</p>
 
       <h3 class="text-lg text-accent mt-7 mb-3">identity (6)</h3>
       <ul>
@@ -343,6 +383,15 @@ tailwind.config = {
         <li><code>ripestat</code>       — RIPE Data API · ASN/prefix/abuse-contact. Private IP gate.</li>
         <li><code>hackertarget</code>   — Free-tier hostsearch + reverse-IP</li>
         <li><code>subdomain_takeover</code>— CNAME + direct-A vs 24 <code>can-i-take-over-xyz</code> fingerprints (HIGH/CRITICAL on body match)</li>
+      </ul>
+
+      <h3 class="text-lg text-accent mt-7 mb-3">new data kinds (5) <span class="text-accent text-xs">— new</span></h3>
+      <ul>
+        <li><code>wallet</code>         — Crypto/blockchain recon: blockchain.info + Blockchair (BTC/ETH balance, tx count, ages) + bitcoinabuse / cryptoscamdb scam reports. No keys.</li>
+        <li><code>image</code>          — Hand-rolled EXIF/IFD0/GPS parser (no Pillow) + reverse-image pivots. URL fetched via the SSRF-guarded client (25 MB cap) or local path.</li>
+        <li><code>dorks</code>          — Search-engine dorking over DuckDuckGo HTML + Bing. Small per-target request budget; defensive regex parsing.</li>
+        <li><code>leaks</code>          — Paste + ransomware-leak monitoring: Pastebin (PRO-gated, skipped anon), GitHub gist code-search (needs <code>GITHUB_TOKEN</code>), api.ransomware.live (free).</li>
+        <li><code>business</code>       — OpenCorporates records: company name, jurisdiction, incorporation date, status, address, first officers. Anon rate-limited; 429 → <code>UNAVAILABLE</code>.</li>
       </ul>
     </section>
 
@@ -486,7 +535,7 @@ tailwind.config = {
     <!-- ═════ 12 CONFIG ═════ -->
     <section id="config" class="mb-16">
       <h2 class="text-2xl font-bold">12 · config + api keys</h2>
-      <p class="mt-4">Default: all 45 modules run on free APIs with no keys. A handful become more useful with optional free-tier keys:</p>
+      <p class="mt-4">Default: all 47 modules run on free APIs with no keys. A handful become more useful with optional free-tier keys:</p>
       <table>
         <thead><tr><th>env var</th><th>module(s)</th><th>get key from</th></tr></thead>
         <tbody>
@@ -513,9 +562,10 @@ tailwind.config = {
 
       <h3 class="text-lg text-accent mt-7 mb-3"><code>--opsec</code> fails with <code>socksio not installed</code></h3>
       <p>The Nuitka onefile bundles <code>httpx[socks]</code> as of v4.2.2; older builds did not. Upgrade with <code>brew upgrade mytools-osint</code> or re-run the one-line installer.</p>
+      <!-- v4.2.2 retained intentionally: this is the historical build in which the fix first shipped, not the current release. -->
 
       <h3 class="text-lg text-accent mt-7 mb-3"><code>wayback_urls</code> times out</h3>
-      <p>Wayback CDX is genuinely slow for busy targets. v4.2.2 dropped the per-call timeout to 12 s and surfaces timeouts as <code>NO_DATA</code> instead of <code>ERROR</code>.</p>
+      <p>Wayback CDX is genuinely slow for busy targets. The per-call timeout is capped at 12 s and timeouts surface as <code>NO_DATA</code> (never <code>ERROR</code>).</p>
 
       <h3 class="text-lg text-accent mt-7 mb-3">Skip the splash on the brew binary</h3>
       <p>Pass <code>--no-splash</code>, <code>--no-banner</code>, or pipe stdout (the splash is auto-suppressed for non-TTY).</p>

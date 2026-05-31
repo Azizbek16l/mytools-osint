@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" role="img" aria-label="mytools-osint">
+  <rect width="24" height="24" rx="4" fill="#0D1117"/>
+  <g fill="none" stroke="#58A6FF" stroke-width="1.5">
+    <path d="M3 4h6v6H3zM15 4h6v6h-6zM3 14h6v6H3zM15 14h6v6h-6z"/>
+    <path d="M12 7v10M7 12h10" stroke-width="1"/>
+  </g>
+</svg>

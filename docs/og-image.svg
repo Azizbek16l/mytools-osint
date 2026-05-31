@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="mytools-osint — OSINT CLI for serious recon">
+  <defs>
+    <linearGradient id="glow" x1="1" y1="0" x2="0.2" y2="1">
+      <stop offset="0" stop-color="#58A6FF" stop-opacity="0.16"/>
+      <stop offset="0.6" stop-color="#0D1117" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#58A6FF"/>
+      <stop offset="1" stop-color="#58A6FF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="#0D1117"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <!-- logo mark -->
+  <g transform="translate(80,80)">
+    <g fill="none" stroke="#58A6FF" stroke-width="3">
+      <path d="M0 0h24v24H0zM48 0h24v24H48zM0 48h24v24H0zM48 48h24v24H48z"/>
+      <path d="M36 12v48M12 36h48" stroke-width="2"/>
+    </g>
+    <text x="100" y="48" font-family="'JetBrains Mono','DejaVu Sans Mono',ui-monospace,monospace" font-size="34" font-weight="700" fill="#C9D1D9">mytools-osint</text>
+    <text x="100" y="48" dx="290" font-family="'JetBrains Mono','DejaVu Sans Mono',ui-monospace,monospace" font-size="22" fill="#58A6FF">v4.3.2</text>
+  </g>
+
+  <!-- headline -->
+  <text x="80" y="290" font-family="'JetBrains Mono','DejaVu Sans Mono',ui-monospace,monospace" font-size="76" font-weight="800" fill="#C9D1D9">OSINT CLI for</text>
+  <text x="80" y="380" font-family="'JetBrains Mono','DejaVu Sans Mono',ui-monospace,monospace" font-size="76" font-weight="800" fill="#58A6FF">serious recon.</text>
+
+  <rect x="82" y="416" width="160" height="4" fill="url(#rule)"/>
+
+  <!-- subline -->
+  <text x="80" y="488" font-family="'JetBrains Mono','DejaVu Sans Mono',ui-monospace,monospace" font-size="28" fill="#8B949E">47 modules · persistent chat shell · entity graph</text>
+  <text x="80" y="528" font-family="'JetBrains Mono','DejaVu Sans Mono',ui-monospace,monospace" font-size="28" fill="#8B949E">auto-pivot · free APIs only</text>
+
+  <!-- prompt line -->
+  <text x="80" y="588" font-family="'JetBrains Mono','DejaVu Sans Mono',ui-monospace,monospace" font-size="26" fill="#3FB950">❯</text>
+  <text x="112" y="588" font-family="'JetBrains Mono','DejaVu Sans Mono',ui-monospace,monospace" font-size="26" fill="#C9D1D9">osint github.com</text>
+
+  <text x="1120" y="588" text-anchor="end" font-family="'JetBrains Mono','DejaVu Sans Mono',ui-monospace,monospace" font-size="22" fill="#D29922">authorised use only</text>
+</svg>

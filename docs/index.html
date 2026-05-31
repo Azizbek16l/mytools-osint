@@ -4,13 +4,43 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>mytools-osint · OSINT CLI for serious recon</title>
-<meta name="description" content="OSINT CLI with 45 modules, entity-graph correlation, auto-pivot, free APIs only. Authorised security testing only." />
-<meta property="og:title" content="mytools-osint · OSINT CLI" />
-<meta property="og:description" content="45 modules · single-fire shell · entity graph · free APIs · authorised use only" />
+<meta name="description" content="OSINT CLI with 47 modules, entity-graph correlation, auto-pivot, free APIs only. Authorised security testing only." />
+<link rel="canonical" href="https://cyber.bluetm.uz/" />
+
+<!-- Open Graph -->
+<meta property="og:title" content="mytools-osint · OSINT CLI for serious recon" />
+<meta property="og:description" content="47 modules · persistent chat shell · entity graph · free APIs · authorised use only" />
 <meta property="og:type" content="website" />
+<meta property="og:url" content="https://cyber.bluetm.uz/" />
+<meta property="og:image" content="https://cyber.bluetm.uz/og-image.svg" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="mytools-osint — OSINT CLI for serious recon" />
+
+<!-- Twitter / X -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="mytools-osint · OSINT CLI for serious recon" />
+<meta name="twitter:description" content="47 modules · persistent chat shell · entity graph · free APIs · authorised use only" />
+<meta name="twitter:image" content="https://cyber.bluetm.uz/og-image.svg" />
+
+<!-- Favicons (reuse the 4-square nav mark) -->
+<link rel="icon" type="image/svg+xml" href="https://cyber.bluetm.uz/favicon.svg" />
+<link rel="apple-touch-icon" href="https://cyber.bluetm.uz/favicon.svg" />
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap" rel="stylesheet">
+<!--
+  NOTE (CSP): This page loads Tailwind via the runtime CDN (cdn.tailwindcss.com),
+  which evaluates inline config + injects <style> at runtime, so a strict
+  CSP would need 'unsafe-inline'/'unsafe-eval' for script-src+style-src — which
+  defeats the point. For production, build Tailwind ahead of time into a purged
+  stylesheet, drop this CDN <script>, then serve a strict policy such as:
+    Content-Security-Policy: default-src 'self';
+      img-src 'self' data:; font-src 'self' https://fonts.gstatic.com;
+      style-src 'self' https://fonts.googleapis.com; script-src 'self'
+  Set it as an HTTP response header at the edge (Caddy/Cloudflare), not a meta tag.
+-->
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
 tailwind.config = {
@@ -22,7 +52,9 @@ tailwind.config = {
         panel: '#161B22',
         line:  '#21262D',
         fg:    '#C9D1D9',
-        dim:   '#6E7681',
+        /* dim used for real prose → must clear WCAG AA 4.5:1 on #0D1117.
+           #8B949E ≈ 6.15:1 (GitHub secondary token); old #6E7681 was 4.12:1. */
+        dim:   '#8B949E',
         accent:'#58A6FF',
         ok:    '#3FB950',
         warn:  '#D29922',
@@ -92,7 +124,7 @@ tailwind.config = {
 
   /* Terminal pane: prompt prefix coloration */
   .term .p { color: #58A6FF; }
-  .term .c { color: #6E7681; }
+  .term .c { color: #8B949E; }
   .term .g { color: #3FB950; }
   .term .r { color: #F85149; }
   .term .w { color: #D29922; }
@@ -131,7 +163,20 @@ tailwind.config = {
     border-color: #58A6FF;
     background: rgba(88,166,255,0.06);
   }
-  .tab { border-color: #21262D; color: #6E7681; }
+  .tab { border-color: #21262D; color: #8B949E; }
+
+  /* ===== mobile horizontal-overflow containment =====
+     Grid/flex items default to min-width:auto, so an unbreakable mono command
+     inside them forces the track to its content width → page-level horizontal
+     scroll on narrow phones. Pin min-width:0 so the track can shrink and the
+     inner overflow-x-auto scroller does its job instead. */
+  .install-pane, .install-row { min-width: 0; }
+  .install-row code { min-width: 0; }
+  /* Recipe cards: flex/grid items default to min-width:auto; pin to 0 so the
+     long command inside scrolls within its own <pre> instead of widening the
+     card past the viewport. */
+  #use-cases .box-plain { min-width: 0; }
+  #use-cases pre { overflow-x: auto; min-width: 0; }
 
   /* Feature card hover lift */
   .card { transition: transform 0.15s, border-color 0.15s, background 0.15s; }
@@ -157,7 +202,19 @@ tailwind.config = {
   body[data-lang="en"] [lang="uz"] { display: none !important; }
   body[data-lang="uz"] [lang="en"] { display: none !important; }
   .lang-toggle button[aria-pressed="true"] { color:#C9D1D9; background: rgba(88,166,255,0.12); }
-  .lang-toggle button { color:#6E7681; }
+  .lang-toggle button { color:#8B949E; }
+
+  /* ===== reduced motion ===== */
+  /* Honour prefers-reduced-motion: kill the blink, type-in stagger, and hover
+     lift; keep the static scanline/grain texture (they don't animate). */
+  @media (prefers-reduced-motion: reduce) {
+    .cursor::after { animation: none; }
+    .reveal { opacity: 1 !important; animation: none !important; transform: none !important; }
+    .card { transition: none; }
+    .card:hover { transform: none; }
+    a.flip, button.flip, .flip { transition: none; }
+    html { scroll-behavior: auto; }
+  }
 </style>
 </head>
 
@@ -167,16 +224,16 @@ tailwind.config = {
 <!-- ═════ NAV ═════ -->
 <nav class="sticky top-0 z-30 bg-bg/85 backdrop-blur-md border-b border-line">
   <div class="max-w-6xl mx-auto px-5 sm:px-8 py-3.5 flex items-center gap-4">
-    <a href="#top" class="flex items-center gap-2.5 text-fg font-bold tracking-tight">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#58A6FF" stroke-width="1.5">
+    <a href="#top" class="flex items-center gap-2.5 text-fg font-bold tracking-tight" aria-label="mytools-osint — home">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#58A6FF" stroke-width="1.5" aria-hidden="true" focusable="false">
         <path d="M3 4h6v6H3zM15 4h6v6h-6zM3 14h6v6H3zM15 14h6v6h-6z"/>
         <path d="M12 7v10M7 12h10" stroke="#58A6FF" stroke-width="1"/>
       </svg>
       <span>mytools-osint</span>
-      <span class="hidden sm:inline ml-1 px-1.5 py-0.5 text-[10px] font-medium text-accent border border-line bg-panel">v4.2.2</span>
+      <span class="hidden sm:inline ml-1 px-1.5 py-0.5 text-[10px] font-medium text-accent border border-line bg-panel">v4.3.2</span>
     </a>
     <div class="ml-auto hidden md:flex items-center gap-1 text-sm text-dim">
-      <a href="#install"   class="flip px-3 py-1.5"><span lang="en">install</span><span lang="uz">o'rnatish</span></a>
+      <a href="#install"   class="flip px-3 py-1.5"><span lang="en">install</span><span lang="uz">oʻrnatish</span></a>
       <span class="text-line">│</span>
       <a href="#modules"   class="flip px-3 py-1.5"><span lang="en">modules</span><span lang="uz">modullar</span></a>
       <span class="text-line">│</span>
@@ -186,9 +243,9 @@ tailwind.config = {
       <span class="text-line">│</span>
       <a href="./docs.html" class="flip px-3 py-1.5"><span lang="en">docs</span><span lang="uz">hujjat</span></a>
       <span class="text-line">│</span>
-      <a href="https://github.com/Azizbek16l/mytools-osint" target="_blank" rel="noopener" class="flip px-3 py-1.5 inline-flex items-center gap-1.5">
+      <a href="https://github.com/Azizbek16l/mytools-osint" target="_blank" rel="noopener" class="flip px-3 py-1.5 inline-flex items-center gap-1.5" aria-label="github (opens in a new tab)">
         github
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M9 7h8v8"/></svg>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M7 17 17 7M9 7h8v8"/></svg>
       </a>
       <span class="text-line ml-2">│</span>
       <span class="lang-toggle ml-1 inline-flex border border-line">
@@ -209,14 +266,14 @@ tailwind.config = {
 
     <!-- Status pill row -->
     <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-dim mb-10">
-      <span class="text-ok">●</span><span lang="en">release</span><span lang="uz">reliz</span>
-      <span class="text-fg">v4.2.2</span>
-      <span class="text-line">·</span>
-      <span lang="en">245 tests passing</span><span lang="uz">245 test o'tdi</span>
-      <span class="text-line">·</span>
+      <span class="text-ok" aria-hidden="true">●</span><span lang="en">release</span><span lang="uz">reliz</span>
+      <span class="text-fg">v4.3.2</span>
+      <span class="text-line" aria-hidden="true">·</span>
+      <span lang="en">246 tests passing</span><span lang="uz">246 test oʻtdi</span>
+      <span class="text-line" aria-hidden="true">·</span>
       <span class="text-accent">MIT</span>
-      <span class="text-line">·</span>
-      <a href="https://github.com/Azizbek16l/mytools-osint/blob/main/CHANGELOG.md" class="flip px-1 underline-offset-2 hover:underline" target="_blank"><span lang="en">changelog</span><span lang="uz">o'zgarishlar</span></a>
+      <span class="text-line" aria-hidden="true">·</span>
+      <a href="https://github.com/Azizbek16l/mytools-osint/blob/main/CHANGELOG.md" class="flip px-1 underline-offset-2 hover:underline" target="_blank" rel="noopener"><span lang="en">changelog</span><span lang="uz">oʻzgarishlar</span></a>
     </div>
 
     <!-- Heading: tight typography, big mono, no fluff -->
@@ -231,28 +288,28 @@ tailwind.config = {
       </span>
     </h1>
     <p lang="en" class="mt-7 max-w-2xl text-sm sm:text-base text-dim leading-relaxed">
-      <span class="text-fg">45 modules</span> across passive + active reconnaissance.
-      <span class="text-fg">Single-fire shell</span> with k9s-grade ergonomics.
+      <span class="text-fg">47 modules</span> across passive + active reconnaissance.
+      <span class="text-fg">Persistent chat shell</span> — Claude-Code-style prompt with slash commands, live tab completion, and ghost-text suggestions.
       <span class="text-fg">Entity graph</span> + bounded BFS auto-pivot.
       <span class="text-fg">Free APIs only</span>, no paid keys.
       <span class="text-warn">Authorised security testing only.</span>
     </p>
     <p lang="uz" class="mt-7 max-w-2xl text-sm sm:text-base text-dim leading-relaxed">
-      Passiv va faol razvedka uchun <span class="text-fg">45 modul</span>.
-      <span class="text-fg">Bir-tugma shell</span> &mdash; k9s darajasidagi qulaylik.
-      <span class="text-fg">Entity-graph</span> &middot; bog'liq mavjudotlar zanjirini avtomatik kuzatadi.
-      <span class="text-fg">Faqat bepul API'lar</span>, hech qanday pulli kalit kerak emas.
+      Passiv va faol razvedka uchun <span class="text-fg">47 modul</span>.
+      <span class="text-fg">Doimiy chat shell</span> &mdash; Claude-Code uslubidagi prompt: slash-buyruqlar, jonli tab-toʻldirish va ghost-text takliflari.
+      <span class="text-fg">Entity-graph</span> &middot; bogʻliq mavjudotlar zanjirini avtomatik kuzatadi.
+      <span class="text-fg">Faqat bepul APIlar</span>, hech qanday pulli kalit kerak emas.
       <span class="text-warn">Faqat ruxsat etilgan xavfsizlik testi uchun.</span>
     </p>
 
     <!-- Quick CTA buttons -->
     <div class="mt-8 flex flex-wrap items-center gap-3 text-sm">
       <a href="#install" class="flip border border-accent text-accent px-4 py-2.5 inline-flex items-center gap-2 font-medium">
-        <span lang="en">$ install ↓</span><span lang="uz">$ o'rnatish ↓</span>
+        <span lang="en">$ install ↓</span><span lang="uz">$ oʻrnatish ↓</span>
       </a>
-      <a href="https://github.com/Azizbek16l/mytools-osint" target="_blank" rel="noopener" class="flip border border-line text-fg px-4 py-2.5 inline-flex items-center gap-2">
-        ★ github
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M9 7h8v8"/></svg>
+      <a href="https://github.com/Azizbek16l/mytools-osint" target="_blank" rel="noopener" class="flip border border-line text-fg px-4 py-2.5 inline-flex items-center gap-2" aria-label="github (opens in a new tab)">
+        <span aria-hidden="true">★</span> github
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M7 17 17 7M9 7h8v8"/></svg>
       </a>
       <a href="https://github.com/Azizbek16l/mytools-osint/releases/latest" target="_blank" rel="noopener" class="flip border border-line text-fg px-4 py-2.5 inline-flex items-center gap-2">
         <span lang="en">releases →</span><span lang="uz">relizlar →</span>
@@ -263,25 +320,24 @@ tailwind.config = {
     <div class="mt-14 sm:mt-16 box-plain bg-panel relative overflow-hidden">
       <!-- terminal title bar -->
       <div class="flex items-center gap-2 px-4 py-2 border-b border-line text-xs text-dim">
-        <span class="text-bad">●</span>
-        <span class="text-warn">●</span>
-        <span class="text-ok">●</span>
-        <span class="ml-3 text-fg">osint — interactive shell</span>
+        <span class="text-bad" aria-hidden="true">●</span>
+        <span class="text-warn" aria-hidden="true">●</span>
+        <span class="text-ok" aria-hidden="true">●</span>
+        <span class="ml-3 text-fg">osint — chat shell</span>
         <span class="ml-auto hidden sm:inline">~/work · 80×24</span>
       </div>
       <pre class="term overflow-x-auto p-5 sm:p-7 text-[12.5px] sm:text-[13px] leading-[1.65] m-0">
-<span class="reveal" data-d="0"><span class="c">$</span> <span class="acc">osint</span></span>
-<span class="reveal" data-d="1"><span class="c">  what are you looking for?</span>
-<span class="c">     examples:</span>  temur   satya@microsoft.com   <span class="acc">+998 90 123 45 67</span>   @durov   github.com
-<span class="c">     tab complete · → accept ghost text · Ctrl-R history · /help</span></span>
+<span class="reveal" data-d="0"><span class="c">$</span> <span class="acc">osint</span>   <span class="c"># opens straight into a persistent prompt — no menu</span></span>
+<span class="reveal" data-d="1"><span class="c">  type a target or /command · tab completes · → accepts ghost text · Ctrl-R history</span></span>
 
-<span class="reveal" data-d="2"><span class="p">❯</span> github.com <span class="c">[DOMAIN] · 32 modules · 4.2s</span></span>
+<span class="reveal" data-d="2"><span class="p">❯</span> github.com<span class="c"> ⟶ github.com/security  </span><span class="c">[DOMAIN · 32 modules]</span></span>
 <span class="reveal" data-d="3">  <span class="g">●</span> Scanning   github.com        <span class="c">[DOMAIN] · 32 modules · 4.2s elapsed</span></span>
 <span class="reveal" data-d="4">  <span class="g">✓</span> <span class="acc">certspotter</span>          <span class="c">39 subdomains via CT logs</span></span>
 <span class="reveal" data-d="5">  <span class="g">✓</span> <span class="acc">favicon_hash</span>         mmh3=<span class="acc">1848946384</span>  <span class="c">→ shodan.io/search?…</span></span>
 <span class="reveal" data-d="6">  <span class="g">✓</span> <span class="acc">wayback_urls</span>         <span class="c">250 archived URLs + 17 historical subdomains</span></span>
 <span class="reveal" data-d="7">  <span class="r">✗</span> <span class="acc">subdomain_takeover</span>   <span class="c">0/32 hosts CRITICAL</span></span>
-<span class="reveal" data-d="8">  <span class="w">graph:</span> +<span class="acc">298</span> entities · +<span class="acc">299</span> edges  <span class="c">→ osint graph show domain github.com</span></span>
+<span class="reveal" data-d="8">  <span class="w">graph:</span> +<span class="acc">298</span> entities · +<span class="acc">299</span> edges  <span class="c">→ /graph show domain github.com</span></span>
+<span class="reveal" data-d="8"><span class="p">❯</span> <span class="c">prompt returns — run another target, or /profile red-team</span></span>
 <span class="reveal cursor" data-d="8"></span></pre>
     </div>
   </div>
@@ -293,61 +349,61 @@ tailwind.config = {
 
     <div class="flex items-end justify-between gap-6 flex-wrap">
       <div>
-        <div class="text-xs text-accent uppercase tracking-widest"><span lang="en">01 // install</span><span lang="uz">01 // o'rnatish</span></div>
+        <div class="text-xs text-accent uppercase tracking-widest"><span lang="en">01 // install</span><span lang="uz">01 // oʻrnatish</span></div>
         <h2 class="section-h text-2xl sm:text-3xl font-bold mt-3"><span lang="en">One command. Pick a platform.</span><span lang="uz">Bitta buyruq. Platformangizni tanlang.</span></h2>
       </div>
       <span class="text-xs text-dim"><span lang="en">SHA-256 verified · MIT · zero phone-home</span><span lang="uz">SHA-256 tekshiruvi · MIT · telemetriyasiz</span></span>
     </div>
 
-    <!-- tab strip -->
+    <!-- tab strip — ARIA tabs pattern: roving tabindex + arrow-key nav (see JS) -->
     <div role="tablist" aria-label="install commands"
          class="mt-10 flex flex-wrap gap-0 border-b border-line text-sm">
-      <button role="tab" id="tab-unix"  data-tab="unix"  aria-selected="true"  class="tab flip px-4 py-3 border-b-2">macOS + Linux</button>
-      <button role="tab" id="tab-win"   data-tab="win"   aria-selected="false" class="tab flip px-4 py-3 border-b-2">Windows</button>
-      <button role="tab" id="tab-brew"  data-tab="brew"  aria-selected="false" class="tab flip px-4 py-3 border-b-2">brew</button>
-      <button role="tab" id="tab-scoop" data-tab="scoop" aria-selected="false" class="tab flip px-4 py-3 border-b-2">scoop</button>
-      <button role="tab" id="tab-wing"  data-tab="winget" aria-selected="false" class="tab flip px-4 py-3 border-b-2">winget</button>
-      <button role="tab" id="tab-dir"   data-tab="direct" aria-selected="false" class="tab flip px-4 py-3 border-b-2">direct</button>
+      <button role="tab" id="tab-unix"  data-tab="unix"   aria-controls="pane-unix"   aria-selected="true"  tabindex="0"  class="tab flip px-4 py-3 border-b-2">macOS + Linux</button>
+      <button role="tab" id="tab-win"   data-tab="win"    aria-controls="pane-win"    aria-selected="false" tabindex="-1" class="tab flip px-4 py-3 border-b-2">Windows</button>
+      <button role="tab" id="tab-brew"  data-tab="brew"   aria-controls="pane-brew"   aria-selected="false" tabindex="-1" class="tab flip px-4 py-3 border-b-2">brew</button>
+      <button role="tab" id="tab-scoop" data-tab="scoop"  aria-controls="pane-scoop"  aria-selected="false" tabindex="-1" class="tab flip px-4 py-3 border-b-2">scoop</button>
+      <button role="tab" id="tab-wing"  data-tab="winget" aria-controls="pane-winget" aria-selected="false" tabindex="-1" class="tab flip px-4 py-3 border-b-2">winget</button>
+      <button role="tab" id="tab-dir"   data-tab="direct" aria-controls="pane-direct" aria-selected="false" tabindex="-1" class="tab flip px-4 py-3 border-b-2">direct</button>
     </div>
 
     <!-- panes -->
     <div class="grid gap-6 mt-8">
-      <div data-pane="unix" class="install-pane">
+      <div data-pane="unix" id="pane-unix" role="tabpanel" aria-labelledby="tab-unix" tabindex="0" class="install-pane">
         <p class="text-sm text-dim mb-3">Linux + macOS · curl pipe to bash · pins to <span class="text-fg">~/.local/bin</span> · no sudo.</p>
         <div class="install-row" data-cmd="curl -fsSL https://raw.githubusercontent.com/Azizbek16l/mytools-osint/main/scripts/install.sh | bash">
           <span class="text-dim mr-3">$</span><code>curl -fsSL https://raw.githubusercontent.com/Azizbek16l/mytools-osint/main/scripts/install.sh | bash</code>
         </div>
       </div>
 
-      <div data-pane="win" class="install-pane hidden">
+      <div data-pane="win" id="pane-win" role="tabpanel" aria-labelledby="tab-win" tabindex="0" class="install-pane hidden">
         <p class="text-sm text-dim mb-3">Windows PowerShell · downloads to <span class="text-fg">%LOCALAPPDATA%\Programs\mytools-osint</span> · adds to user PATH · no admin.</p>
         <div class="install-row" data-cmd="irm https://raw.githubusercontent.com/Azizbek16l/mytools-osint/main/scripts/install.ps1 | iex">
           <span class="text-dim mr-3">PS&gt;</span><code>irm https://raw.githubusercontent.com/Azizbek16l/mytools-osint/main/scripts/install.ps1 | iex</code>
         </div>
       </div>
 
-      <div data-pane="brew" class="install-pane hidden">
+      <div data-pane="brew" id="pane-brew" role="tabpanel" aria-labelledby="tab-brew" tabindex="0" class="install-pane hidden">
         <p class="text-sm text-dim mb-3">macOS arm64 + Linux x86_64 · auto-upgrade via <span class="text-fg">brew upgrade</span>.</p>
         <div class="install-row" data-cmd="brew tap Azizbek16l/osint && brew install mytools-osint">
           <span class="text-dim mr-3">$</span><code>brew tap Azizbek16l/osint &amp;&amp; brew install mytools-osint</code>
         </div>
       </div>
 
-      <div data-pane="scoop" class="install-pane hidden">
+      <div data-pane="scoop" id="pane-scoop" role="tabpanel" aria-labelledby="tab-scoop" tabindex="0" class="install-pane hidden">
         <p class="text-sm text-dim mb-3">Windows x64 · auto-upgrade via <span class="text-fg">scoop update</span>.</p>
         <div class="install-row" data-cmd="scoop bucket add osint https://github.com/Azizbek16l/scoop-bucket && scoop install mytools-osint">
           <span class="text-dim mr-3">PS&gt;</span><code>scoop bucket add osint https://github.com/Azizbek16l/scoop-bucket &amp;&amp; scoop install mytools-osint</code>
         </div>
       </div>
 
-      <div data-pane="winget" class="install-pane hidden">
+      <div data-pane="winget" id="pane-winget" role="tabpanel" aria-labelledby="tab-wing" tabindex="0" class="install-pane hidden">
         <p class="text-sm text-dim mb-3">Windows x64 · official Microsoft package repo. <span class="text-warn">pending review</span> on each new release.</p>
         <div class="install-row" data-cmd="winget install Azizbek16l.mytools-osint">
           <span class="text-dim mr-3">PS&gt;</span><code>winget install Azizbek16l.mytools-osint</code>
         </div>
       </div>
 
-      <div data-pane="direct" class="install-pane hidden">
+      <div data-pane="direct" id="pane-direct" role="tabpanel" aria-labelledby="tab-dir" tabindex="0" class="install-pane hidden">
         <p class="text-sm text-dim mb-3">Pick your platform binary from the release page · verify SHA-256.</p>
         <div class="grid sm:grid-cols-3 gap-3">
           <a href="https://github.com/Azizbek16l/mytools-osint/releases/latest/download/osint-macos-arm64" target="_blank" rel="noopener" class="flip box-plain p-4 text-sm">
@@ -382,47 +438,47 @@ tailwind.config = {
     <div class="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-line">
       <!-- Each card on a 1-px line grid → reads as a true terminal grid -->
       <div class="card bg-bg p-6">
-        <div class="text-2xl mb-3">🎯</div>
-        <div class="text-fg font-medium">Single-fire shell</div>
-        <p class="text-sm text-dim mt-2 leading-relaxed"><code class="text-accent">q</code> / <code class="text-accent">i</code> / <code class="text-accent">l</code> / <code class="text-accent">m</code> fire instantly. No Enter required. lazygit / k9s / btop ergonomics.</p>
+        <div class="text-2xl mb-3" aria-hidden="true">🎯</div>
+        <div class="text-fg font-medium">Persistent chat shell</div>
+        <p class="text-sm text-dim mt-2 leading-relaxed">Claude-Code-style prompt. Type a target → scan streams inline → prompt returns. Slash commands, live tab completion, ghost-text history. <code class="text-accent">--classic</code> keeps the old menu.</p>
       </div>
       <div class="card bg-bg p-6">
-        <div class="text-2xl mb-3">🎨</div>
+        <div class="text-2xl mb-3" aria-hidden="true">🎨</div>
         <div class="text-fg font-medium">7 themes, in-app picker</div>
         <p class="text-sm text-dim mt-2 leading-relaxed">github-dark · github-light · dracula · nord · tokyo-night · catppuccin-mocha · high-contrast. Persisted across launches.</p>
       </div>
       <div class="card bg-bg p-6">
-        <div class="text-2xl mb-3">🧬</div>
+        <div class="text-2xl mb-3" aria-hidden="true">🧬</div>
         <div class="text-fg font-medium">Entity graph + auto-pivot</div>
         <p class="text-sm text-dim mt-2 leading-relaxed">19 entity types, 33 edge types. Bounded BFS with per-edge cost budget. Export to GEXF / GraphML / Cytoscape.</p>
       </div>
       <div class="card bg-bg p-6">
-        <div class="text-2xl mb-3">🔍</div>
-        <div class="text-fg font-medium">45 modules</div>
+        <div class="text-2xl mb-3" aria-hidden="true">🔍</div>
+        <div class="text-fg font-medium">47 modules</div>
         <p class="text-sm text-dim mt-2 leading-relaxed">Passive + active recon. crt.sh, CertSpotter, RIPEstat, HackerTarget, Wayback, Shodan InternetDB. Free APIs only.</p>
       </div>
       <div class="card bg-bg p-6">
-        <div class="text-2xl mb-3">🛡</div>
+        <div class="text-2xl mb-3" aria-hidden="true">🛡</div>
         <div class="text-fg font-medium">OPSEC mode</div>
         <p class="text-sm text-dim mt-2 leading-relaxed">SOCKS5 routing, jitter, UA rotation. Active modules refuse to run unless you set the per-module override env.</p>
       </div>
       <div class="card bg-bg p-6">
-        <div class="text-2xl mb-3">🤖</div>
+        <div class="text-2xl mb-3" aria-hidden="true">🤖</div>
         <div class="text-fg font-medium">Optional AI explain</div>
         <p class="text-sm text-dim mt-2 leading-relaxed">Claude haiku/sonnet over findings. Disabled in <code class="text-accent">--opsec</code> mode. Local-first by default.</p>
       </div>
       <div class="card bg-bg p-6">
-        <div class="text-2xl mb-3">📤</div>
+        <div class="text-2xl mb-3" aria-hidden="true">📤</div>
         <div class="text-fg font-medium">SIEM exporters</div>
         <p class="text-sm text-dim mt-2 leading-relaxed">Splunk HEC · Elasticsearch bulk · syslog RFC 5424 · MISP Event API. Ship to your existing pipeline.</p>
       </div>
       <div class="card bg-bg p-6">
-        <div class="text-2xl mb-3">📊</div>
+        <div class="text-2xl mb-3" aria-hidden="true">📊</div>
         <div class="text-fg font-medium">Web dashboard</div>
         <p class="text-sm text-dim mt-2 leading-relaxed">Local-only HTTP + SSE live stream. Vanilla-JS Verlet force-graph. Zero external deps. <code class="text-accent">osint serve</code>.</p>
       </div>
       <div class="card bg-bg p-6">
-        <div class="text-2xl mb-3">🕸</div>
+        <div class="text-2xl mb-3" aria-hidden="true">🕸</div>
         <div class="text-fg font-medium">Auto-pivot</div>
         <p class="text-sm text-dim mt-2 leading-relaxed">Discovered entities feed a bounded BFS that follows high-value edges first. <code class="text-accent">--pivot DEPTH</code>.</p>
       </div>
@@ -435,15 +491,15 @@ tailwind.config = {
   <div class="max-w-6xl mx-auto px-5 sm:px-8 py-16 sm:py-24">
 
     <div class="text-xs text-accent uppercase tracking-widest"><span lang="en">03 // modules</span><span lang="uz">03 // modullar</span></div>
-    <h2 class="section-h text-2xl sm:text-3xl font-bold mt-3"><span lang="en">45 modules. Organised by intent.</span><span lang="uz">45 modul. Maqsad bo'yicha guruhlangan.</span></h2>
+    <h2 class="section-h text-2xl sm:text-3xl font-bold mt-3"><span lang="en">47 modules. Organised by intent.</span><span lang="uz">47 modul. Maqsad boʻyicha guruhlangan.</span></h2>
     <p lang="en" class="mt-3 text-sm text-dim max-w-2xl">Every module is a standalone async coroutine. Mix per-scan with <code class="text-accent">--enable</code> / <code class="text-accent">--disable</code>, or use a profile bundle.</p>
-    <p lang="uz" class="mt-3 text-sm text-dim max-w-2xl">Har bir modul mustaqil async coroutine. Skan bo'yicha aralashtirish: <code class="text-accent">--enable</code> / <code class="text-accent">--disable</code>, yoki tayyor profile to'plamidan foydalaning.</p>
+    <p lang="uz" class="mt-3 text-sm text-dim max-w-2xl">Har bir modul mustaqil async coroutine. Skan boʻyicha aralashtirish: <code class="text-accent">--enable</code> / <code class="text-accent">--disable</code>, yoki tayyor profile toʻplamidan foydalaning.</p>
 
     <div class="mt-12 grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-10">
 
       <div>
         <div class="text-fg font-medium flex items-center gap-2 mb-3">
-          <span class="text-accent">▸</span> identity / <span class="text-dim text-xs">6</span>
+          <span class="text-accent" aria-hidden="true">▸</span> identity / <span class="text-dim text-xs">6</span>
         </div>
         <ul class="text-sm text-dim grid grid-cols-2 gap-y-1 gap-x-4">
           <li>username</li><li>email</li><li>email_extras</li>
@@ -453,7 +509,7 @@ tailwind.config = {
 
       <div>
         <div class="text-fg font-medium flex items-center gap-2 mb-3">
-          <span class="text-accent">▸</span> network / <span class="text-dim text-xs">10</span>
+          <span class="text-accent" aria-hidden="true">▸</span> network / <span class="text-dim text-xs">10</span>
         </div>
         <ul class="text-sm text-dim grid grid-cols-2 gap-y-1 gap-x-4">
           <li>ip</li><li>ip_extras</li><li>domain</li><li>discovery</li>
@@ -464,7 +520,7 @@ tailwind.config = {
 
       <div>
         <div class="text-fg font-medium flex items-center gap-2 mb-3">
-          <span class="text-accent">▸</span> threat intel / <span class="text-dim text-xs">4</span>
+          <span class="text-accent" aria-hidden="true">▸</span> threat intel / <span class="text-dim text-xs">4</span>
         </div>
         <ul class="text-sm text-dim grid grid-cols-2 gap-y-1 gap-x-4">
           <li>internetdb</li><li>threat_intel</li>
@@ -474,7 +530,7 @@ tailwind.config = {
 
       <div>
         <div class="text-fg font-medium flex items-center gap-2 mb-3">
-          <span class="text-accent">▸</span> defense surface / <span class="text-dim text-xs">8</span>
+          <span class="text-accent" aria-hidden="true">▸</span> defense surface / <span class="text-dim text-xs">8</span>
         </div>
         <ul class="text-sm text-dim grid grid-cols-2 gap-y-1 gap-x-4">
           <li>email_security</li><li>typosquat</li><li>pgp_keys</li><li>tor_check</li>
@@ -484,7 +540,7 @@ tailwind.config = {
 
       <div>
         <div class="text-fg font-medium flex items-center gap-2 mb-3">
-          <span class="text-accent">▸</span> hardening / <span class="text-dim text-xs">4</span>
+          <span class="text-accent" aria-hidden="true">▸</span> hardening / <span class="text-dim text-xs">4</span>
         </div>
         <ul class="text-sm text-dim grid grid-cols-2 gap-y-1 gap-x-4">
           <li>web_hardening</li><li>well_known</li>
@@ -494,7 +550,7 @@ tailwind.config = {
 
       <div>
         <div class="text-fg font-medium flex items-center gap-2 mb-3">
-          <span class="text-accent">▸</span> active recon / <span class="text-dim text-xs">7</span>
+          <span class="text-accent" aria-hidden="true">▸</span> active recon / <span class="text-dim text-xs">7</span>
         </div>
         <ul class="text-sm text-dim grid grid-cols-2 gap-y-1 gap-x-4">
           <li>route_discover</li><li>subdomain_permute</li><li>port_scan</li><li>waf_detect</li>
@@ -504,7 +560,7 @@ tailwind.config = {
 
       <div class="md:col-span-2">
         <div class="text-fg font-medium flex items-center gap-2 mb-3">
-          <span class="text-accent">▸</span> v4.2 free sources / <span class="text-dim text-xs">6 · new</span>
+          <span class="text-accent" aria-hidden="true">▸</span> v4.2 free sources / <span class="text-dim text-xs">6</span>
         </div>
         <ul class="text-sm text-dim grid grid-cols-2 md:grid-cols-3 gap-y-1 gap-x-4">
           <li><span class="text-fg">favicon_hash</span>      <span class="text-dim text-xs"> · Shodan MMH3 pivot</span></li>
@@ -515,6 +571,19 @@ tailwind.config = {
           <li><span class="text-fg">subdomain_takeover</span><span class="text-dim text-xs"> · CNAME + direct-A check</span></li>
         </ul>
       </div>
+
+      <div class="md:col-span-2">
+        <div class="text-fg font-medium flex items-center gap-2 mb-3">
+          <span class="text-accent" aria-hidden="true">▸</span> new data kinds / <span class="text-dim text-xs">5 · new</span>
+        </div>
+        <ul class="text-sm text-dim grid grid-cols-2 md:grid-cols-3 gap-y-1 gap-x-4">
+          <li><span class="text-fg">wallet</span>      <span class="text-dim text-xs"> · BTC/ETH explorers + scam DB</span></li>
+          <li><span class="text-fg">image</span>       <span class="text-dim text-xs"> · EXIF/GPS + reverse-image</span></li>
+          <li><span class="text-fg">dorks</span>       <span class="text-dim text-xs"> · DuckDuckGo + Bing SERPs</span></li>
+          <li><span class="text-fg">leaks</span>      <span class="text-dim text-xs"> · paste + ransomware.live</span></li>
+          <li><span class="text-fg">business</span>    <span class="text-dim text-xs"> · OpenCorporates records</span></li>
+        </ul>
+      </div>
     </div>
   </div>
 </section>
@@ -523,9 +592,9 @@ tailwind.config = {
 <section id="profiles" class="border-t border-line bg-panel/30">
   <div class="max-w-6xl mx-auto px-5 sm:px-8 py-16 sm:py-24">
     <div class="text-xs text-accent uppercase tracking-widest"><span lang="en">04 // profiles</span><span lang="uz">04 // profillar</span></div>
-    <h2 class="section-h text-2xl sm:text-3xl font-bold mt-3"><span lang="en">Curated module bundles.</span><span lang="uz">Tayyor modul to'plamlari.</span></h2>
+    <h2 class="section-h text-2xl sm:text-3xl font-bold mt-3"><span lang="en">Curated module bundles.</span><span lang="uz">Tayyor modul toʻplamlari.</span></h2>
     <p lang="en" class="mt-3 text-sm text-dim max-w-2xl">12 profiles dial scope by intent — quick triage, deep red-team, blue-team surface, IOC lookup. Pass <code class="text-accent">--profile NAME</code>.</p>
-    <p lang="uz" class="mt-3 text-sm text-dim max-w-2xl">12 profile maqsad bo'yicha skan ko'lamini boshqaradi — tezkor triage, chuqur red-team, blue-team yuzasi, IOC qidiruvi. Buyruq: <code class="text-accent">--profile NAME</code>.</p>
+    <p lang="uz" class="mt-3 text-sm text-dim max-w-2xl">12 profile maqsad boʻyicha skan koʻlamini boshqaradi — tezkor triage, chuqur red-team, blue-team yuzasi, IOC qidiruvi. Buyruq: <code class="text-accent">--profile NAME</code>.</p>
 
     <div class="mt-10 grid grid-cols-2 md:grid-cols-4 gap-px bg-line">
       <div class="bg-bg p-5">
@@ -598,7 +667,7 @@ tailwind.config = {
 
       <div class="box-plain p-6 bg-bg flex flex-col">
         <div class="text-xs text-dim uppercase tracking-widest"><span lang="en">recipe 02</span><span lang="uz">retsept 02</span></div>
-        <div class="text-fg font-medium mt-1"><span lang="en">Hunt subdomain takeovers</span><span lang="uz">Subdomen takeover'larini topish</span></div>
+        <div class="text-fg font-medium mt-1"><span lang="en">Hunt subdomain takeovers</span><span lang="uz">Subdomen takeoverlarini topish</span></div>
         <p lang="en" class="text-sm text-dim mt-2 leading-relaxed flex-1">CNAME chain + direct-A check vs 24 <code>can-i-take-over-xyz</code> fingerprints. Favicon hash pivots origin-IP behind CDN.</p>
         <p lang="uz" class="text-sm text-dim mt-2 leading-relaxed flex-1">CNAME zanjiri + direct-A tekshiruvi 24 ta <code>can-i-take-over-xyz</code> fingerprint'iga qarshi. Favicon hash CDN orqasidagi origin-IP'ni topadi.</p>
         <pre class="mt-5 text-[12px] sm:text-[13px] leading-snug box-plain px-3 py-2 bg-panel"><span class="c">$</span> osint example.com <span class="acc">--enable subdomain_takeover --enable favicon_hash</span></pre>
@@ -606,7 +675,7 @@ tailwind.config = {
 
       <div class="box-plain p-6 bg-bg flex flex-col">
         <div class="text-xs text-dim uppercase tracking-widest"><span lang="en">recipe 03</span><span lang="uz">retsept 03</span></div>
-        <div class="text-fg font-medium mt-1"><span lang="en">Profile a username across the web</span><span lang="uz">Username'ni internet bo'ylab tekshirish</span></div>
+        <div class="text-fg font-medium mt-1"><span lang="en">Profile a username across the web</span><span lang="uz">Usernameni internet boʻylab tekshirish</span></div>
         <p lang="en" class="text-sm text-dim mt-2 leading-relaxed flex-1">Sherlock + WhatsMyName + 1,008 sites. Discovery dorks. PGP key lookup. GitHub leak scan.</p>
         <p lang="uz" class="text-sm text-dim mt-2 leading-relaxed flex-1">Sherlock + WhatsMyName + 1,008 ta sayt. Discovery dorklar. PGP kalit qidiruvi. GitHub leak skani.</p>
         <pre class="mt-5 text-[12px] sm:text-[13px] leading-snug box-plain px-3 py-2 bg-panel"><span class="c">$</span> osint <span class="acc">temur</span></pre>
@@ -620,7 +689,7 @@ tailwind.config = {
 <section class="border-t border-line stripes">
   <div class="max-w-6xl mx-auto px-5 sm:px-8 py-14">
     <div class="flex flex-col md:flex-row md:items-center gap-5 md:gap-10">
-      <div class="text-warn text-2xl shrink-0">⚠</div>
+      <div class="text-warn text-2xl shrink-0" aria-hidden="true">⚠</div>
       <div class="flex-1">
         <div class="text-fg font-medium">
           <span lang="en">Authorised security testing only.</span>
@@ -632,10 +701,10 @@ tailwind.config = {
           to run in <code class="text-accent">--opsec</code> mode unless you set a per-module override. Use with care.
         </p>
         <p lang="uz" class="text-sm text-dim mt-1.5 leading-relaxed max-w-3xl">
-          mytools-osint uchinchi tomon API'lariga so'rov yuboradi va siz ko'rsatgan hostlarni tekshiradi. Har bir tekshiruv uchun
-          rasmiy ruxsat olganligingizga ishonch hosil qilish — sizning mas'uliyatingiz. Faol modullar (route_discover, port_scan,
-          subdomain_takeover, favicon_hash) <code class="text-accent">--opsec</code> rejimida modul-bo'yicha override env
-          o'rnatilmaguncha ishlamaydi. Ehtiyot bo'lib ishlating.
+          mytools-osint uchinchi tomon APIlariga soʻrov yuboradi va siz koʻrsatgan hostlarni tekshiradi. Har bir tekshiruv uchun
+          rasmiy ruxsat olganligingizga ishonch hosil qilish — sizning masʼuliyatingiz. Faol modullar (route_discover, port_scan,
+          subdomain_takeover, favicon_hash) <code class="text-accent">--opsec</code> rejimida modul-boʻyicha override env
+          oʻrnatilmaguncha ishlamaydi. Ehtiyot boʻlib ishlating.
         </p>
       </div>
       <a href="https://github.com/Azizbek16l/mytools-osint" target="_blank" rel="noopener" class="flip border border-accent text-accent px-4 py-2.5 text-sm self-start md:self-auto inline-flex items-center gap-2 shrink-0">
@@ -652,14 +721,14 @@ tailwind.config = {
 
     <div>
       <div class="flex items-center gap-2 text-fg font-bold mb-3">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#58A6FF" stroke-width="1.5">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#58A6FF" stroke-width="1.5" aria-hidden="true" focusable="false">
           <path d="M3 4h6v6H3zM15 4h6v6h-6zM3 14h6v6H3zM15 14h6v6h-6z"/>
           <path d="M12 7v10M7 12h10" stroke="#58A6FF" stroke-width="1"/>
         </svg>
         mytools-osint
       </div>
       <p class="text-xs text-dim leading-relaxed">
-        Personal OSINT CLI. 45 modules. Free APIs only.<br>
+        Personal OSINT CLI. 47 modules. Free APIs only.<br>
         Built by <a href="https://bluetm.uz" class="text-accent und" target="_blank" rel="noopener">Bluetm.uz</a>.
       </p>
     </div>
@@ -686,9 +755,10 @@ tailwind.config = {
   </div>
   <div class="border-t border-line">
     <div class="max-w-6xl mx-auto px-5 sm:px-8 py-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-dim">
-      <span>© 2026 Bluetm.uz · MIT License</span>
-      <span class="text-line">────────────────────────────────────</span>
-      <span class="cursor">made with mono and grit</span>
+      <span class="shrink-0">© 2026 Bluetm.uz · MIT License</span>
+      <!-- decorative rule: real border (no unbreakable ASCII string → no mobile overflow) -->
+      <span class="hidden sm:block flex-1 h-px bg-line mx-4" aria-hidden="true"></span>
+      <span class="cursor shrink-0">made with mono and grit</span>
     </div>
   </div>
 </footer>
@@ -719,16 +789,41 @@ tailwind.config = {
     set(initial || 'en');
   })();
 
-  // -------- install tab switcher --------
-  const tabs  = document.querySelectorAll('[role="tab"]');
-  const panes = document.querySelectorAll('[data-pane]');
-  tabs.forEach(t => {
-    t.addEventListener('click', () => {
-      const k = t.dataset.tab;
-      tabs.forEach(x => x.setAttribute('aria-selected', x === t ? 'true' : 'false'));
+  // -------- install tabs (ARIA tabs pattern: roving tabindex + arrow nav) --------
+  (function () {
+    const tabs  = Array.from(document.querySelectorAll('[role="tab"]'));
+    const panes = Array.from(document.querySelectorAll('[data-pane]'));
+    if (!tabs.length) return;
+
+    function activate(tab, { focus = false } = {}) {
+      const k = tab.dataset.tab;
+      tabs.forEach(x => {
+        const on = x === tab;
+        x.setAttribute('aria-selected', on ? 'true' : 'false');
+        x.tabIndex = on ? 0 : -1;        // roving tabindex
+      });
       panes.forEach(p => p.classList.toggle('hidden', p.dataset.pane !== k));
+      if (focus) tab.focus();
+    }
+
+    tabs.forEach((tab, i) => {
+      tab.addEventListener('click', () => activate(tab));
+      tab.addEventListener('keydown', (e) => {
+        let next = null;
+        switch (e.key) {
+          case 'ArrowRight':
+          case 'ArrowDown': next = tabs[(i + 1) % tabs.length]; break;
+          case 'ArrowLeft':
+          case 'ArrowUp':   next = tabs[(i - 1 + tabs.length) % tabs.length]; break;
+          case 'Home':      next = tabs[0]; break;
+          case 'End':       next = tabs[tabs.length - 1]; break;
+          default: return;
+        }
+        e.preventDefault();
+        activate(next, { focus: true });
+      });
     });
-  });
+  })();
 
   // -------- copy-to-clipboard for install rows --------
   document.querySelectorAll('.install-row').forEach(row => {
