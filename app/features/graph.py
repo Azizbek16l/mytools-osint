@@ -287,7 +287,9 @@ def cmd_graph(argv: list[str]) -> int:
 
             if sub == "forget" and len(argv) >= 3:
                 kind_str, value = argv[1].lower(), argv[2]
-                from app.core.entities import EntityType
+                # EntityType is imported at module level (top of file); a local
+                # re-import here turned it function-local, so the earlier
+                # show/export branch raised UnboundLocalError (ruff F823).
                 try:
                     EntityType(kind_str)
                 except ValueError:

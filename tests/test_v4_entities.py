@@ -2,18 +2,15 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
-
-import pytest
 
 from app.core.entities import (
-    EDGE_COST,
     DEFAULT_EDGE_COST,
+    EDGE_COST,
+    PIVOT_PROFILE,
     Edge,
     EdgeType,
     Entity,
     EntityType,
-    PIVOT_PROFILE,
     canonical_key,
     entity_id,
     is_noisy,

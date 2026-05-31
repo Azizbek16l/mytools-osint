@@ -1,5 +1,4 @@
 """v4.2 module registration + sanity tests (no network)."""
-import pytest
 from app.core.runner import runner
 
 
@@ -41,7 +40,7 @@ def test_theme_registry_complete():
 def test_theme_persistence_roundtrip(tmp_path, monkeypatch):
     """persist_theme writes + read_persisted_theme reads it back."""
     monkeypatch.setattr("app.ui.tokens._THEME_CONFIG_PATH", str(tmp_path / "theme"))
-    from app.ui.tokens import persist_theme, _read_persisted_theme
+    from app.ui.tokens import _read_persisted_theme, persist_theme
     persist_theme("dracula")
     assert _read_persisted_theme() == "dracula"
     # Unknown name → not persisted.

@@ -2,7 +2,6 @@
 as 'GraphQL endpoint exists' (not just 200)."""
 import asyncio
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.types import Query, QueryKind

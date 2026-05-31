@@ -88,7 +88,10 @@ async def _host_blocked(host: str | None) -> bool:
     except Exception as e:
         # FAIL CLOSED: a name we can't resolve is one we can't prove is safe.
         # Do NOT cache the failure (it may be transient) and do NOT allow it.
-        log.warning("SSRF guard: resolution failed for %r, blocking: %s", host, e)
+        # This is almost always a benign NXDOMAIN (a probe host that doesn't
+        # exist, e.g. mta-sts.<domain>) — not an attack — so log at DEBUG to
+        # keep normal scans quiet; the caller still sees the request blocked.
+        log.debug("SSRF guard: resolution failed for %r, blocking: %s", host, e)
         return True
     _resolve_cache[host] = (blocked, now + _RESOLVE_TTL_SEC)
     return blocked

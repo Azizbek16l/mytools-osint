@@ -1,9 +1,7 @@
 """Lock-in regression: P0 + P1 security fixes from v4.2.0 security audit."""
 import asyncio
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from app.core.types import HitStatus, Query, QueryKind
 
@@ -65,6 +63,7 @@ def test_url_injection_protected_certspotter():
     """P1 — query.value with `&` must be url-quoted to prevent param injection."""
     # We don't make a real call; just inspect that quote() is used.
     import inspect
+
     from app.modules import certspotter
     src = inspect.getsource(certspotter._run)
     assert "quote(" in src, "certspotter must url-quote the domain"
@@ -72,6 +71,7 @@ def test_url_injection_protected_certspotter():
 
 def test_url_injection_protected_wayback():
     import inspect
+
     from app.modules import wayback_urls
     src = inspect.getsource(wayback_urls._run)
     assert "quote(" in src, "wayback_urls must url-quote the host pattern"
@@ -79,6 +79,7 @@ def test_url_injection_protected_wayback():
 
 def test_url_injection_protected_hackertarget():
     import inspect
+
     from app.modules import hackertarget
     src = inspect.getsource(hackertarget._call)
     assert "quote(" in src, "hackertarget must url-quote resource"
@@ -86,6 +87,7 @@ def test_url_injection_protected_hackertarget():
 
 def test_url_injection_protected_ripestat():
     import inspect
+
     from app.modules import ripestat
     src = inspect.getsource(ripestat._call)
     assert "quote(" in src, "ripestat must url-quote resource"
@@ -96,6 +98,7 @@ def test_url_injection_protected_ripestat():
 def test_command_palette_use_jk_keys_disabled():
     """Regression: questionary 2.1.1 crashes if use_search_filter + jk both on."""
     import inspect
+
     from app.ui import command_palette
     src = inspect.getsource(command_palette.open_palette)
     # Verify the workaround is in place — must be explicitly False.
@@ -128,6 +131,7 @@ def test_theme_picker_default_uses_value_not_label():
     Passing the label raises ValueError 'Invalid default value passed'.
     """
     import inspect
+
     from app.ui import interactive
     src = inspect.getsource(interactive._action_theme_picker)
     # The fixed form must pass current_name (which is in choice.value), not
