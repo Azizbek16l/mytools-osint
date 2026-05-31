@@ -12,16 +12,18 @@ instead — replacing the binary in those layouts would break the wrapper.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
 import shutil
 import sys
 import tempfile
-import urllib.request
 from pathlib import Path
 
 from app import __version__ as CURRENT_VERSION
+from app.core.http import close_client
+from app.core.http import request as http_request
 
 REPO = "Azizbek16l/mytools-osint"
 RELEASE_API = f"https://api.github.com/repos/{REPO}/releases/latest"
@@ -39,35 +41,54 @@ def _platform_asset() -> str | None:
     return None
 
 
-def _fetch(url: str, dest: Path | None = None) -> bytes | None:
+async def _afetch(url: str) -> bytes | None:
+    """Fetch ``url`` through the shared SSRF-guarded / OPSEC-aware client.
+
+    Routing through ``app.core.http`` means self-update honours the same
+    egress policy as scans: under ``OSINT_OPSEC=1`` traffic goes via the
+    SOCKS/Tor proxy (no real-IP leak to GitHub), and internal/metadata
+    targets are rejected. httpx uses certifi's CA bundle by default, so the
+    macOS Python.framework trust-store gap is covered too.
+    """
     # GitHub's REST API requires application/vnd.github+json for the
     # /releases/* endpoints; release-asset downloads need octet-stream.
     accept = ("application/vnd.github+json"
               if "api.github.com" in url else "application/octet-stream")
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": f"mytools-osint/{CURRENT_VERSION}",
-                 "Accept": accept,
-                 "X-GitHub-Api-Version": "2022-11-28"},
-    )
-    # Prefer certifi's CA bundle — stdlib SSL fails on Python.framework
-    # builds (macOS) and on systems where the OS trust store isn't wired up.
-    import ssl
+    headers = {
+        "User-Agent": f"mytools-osint/{CURRENT_VERSION}",
+        "Accept": accept,
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    resp = await http_request("GET", url, retries=1, timeout=30.0, headers=headers)
+    if resp is None:
+        return None
+    if resp.status_code != 200:
+        print(f"  fetch failed: HTTP {resp.status_code} for {url}", file=sys.stderr)
+        return None
+    return resp.content
+
+
+def _fetch(url: str, dest: Path | None = None) -> bytes | None:
+    """Sync wrapper around :func:`_afetch`. Optionally writes to ``dest``."""
     try:
-        import certifi
-        ctx: ssl.SSLContext | None = ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        ctx = None
-    try:
-        with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
-            data = resp.read()
-            if dest:
-                dest.write_bytes(data)
-                return None
-            return data
+        data = asyncio.run(_run_fetch(url))
     except Exception as e:
         print(f"  fetch failed: {e}", file=sys.stderr)
         return None
+    if data is None:
+        return None
+    if dest:
+        dest.write_bytes(data)
+        return None
+    return data
+
+
+async def _run_fetch(url: str) -> bytes | None:
+    """Fetch then close the shared client (we own no long-lived loop here)."""
+    try:
+        return await _afetch(url)
+    finally:
+        await close_client()
 
 
 def _is_pipx_install() -> bool:

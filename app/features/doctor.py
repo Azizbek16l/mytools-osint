@@ -25,6 +25,7 @@ from pathlib import Path
 import httpx
 
 from app.core.config import settings, user_config_path
+from app.core.http import get_client
 from app.features.ai import (
     DEFAULT_OLLAMA_MODEL,
     OLLAMA_URL,
@@ -209,11 +210,15 @@ async def _check_ai() -> Section:
             "Ollama models", "none installed", status=WARN,
             hint=f"`ollama pull {DEFAULT_OLLAMA_MODEL}`",
         )
+    _have_key = bool(os.getenv("ANTHROPIC_API_KEY"))
     sect.add(
         "ANTHROPIC_API_KEY",
-        "set" if os.getenv("ANTHROPIC_API_KEY") else "unset",
-        status=OK if os.getenv("ANTHROPIC_API_KEY") else WARN,
-        hint="set to enable Claude provider (`osint config set ANTHROPIC_API_KEY …`)",
+        "set" if _have_key else "unset",
+        status=OK if _have_key else WARN,
+        # Only show the call-to-action when the key is actually missing; a
+        # healthy "set" row shouldn't carry a now-irrelevant hint.
+        hint="" if _have_key
+        else "set to enable Claude provider (`osint config set ANTHROPIC_API_KEY …`)",
     )
     opsec = os.getenv("OSINT_OPSEC", "").strip().lower() in {"1", "true", "yes", "on"}
     sect.add(
@@ -297,14 +302,19 @@ def _check_config() -> Section:
 
 async def _check_network() -> Section:
     sect = Section("Network")
-    # Single, harmless HEAD against a CT log we already use. 5 s timeout is
-    # plenty on a healthy link and tells us at most "proxy/firewall trouble".
+    # Single, harmless HEAD against a CT log we already use. Route it through
+    # the shared SSRF-guarded / OPSEC-aware client so the probe honours the
+    # same egress policy (Tor/SOCKS under OPSEC, no internal targets) as real
+    # scans — a bare client would leak the host's real IP under OPSEC.
     try:
-        async with httpx.AsyncClient(timeout=5.0) as c:
-            r = await c.head("https://crt.sh", follow_redirects=True)
+        client = await get_client()
+        r = await client.head("https://crt.sh", follow_redirects=True,
+                              timeout=5.0)
         sect.add("crt.sh reachability", f"HTTP {r.status_code}",
                  status=OK if r.status_code < 500 else WARN)
     except (httpx.HTTPError, OSError) as e:
+        # A network probe failure is upstream/transport, not a tool bug — keep
+        # it a WARN (osint still runs); the hint carries the cause.
         sect.add("crt.sh reachability", "FAIL",
                  status=WARN, hint=f"{type(e).__name__}: {e}")
     return sect

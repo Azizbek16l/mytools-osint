@@ -97,16 +97,27 @@ def test_render_launchd_plist_rejects_cron():
         render_launchd_plist(s)
 
 
-def test_render_launchd_plist_escapes_args():
+def test_render_launchd_plist_rejects_unsafe_args():
+    # WP-C: a command arg with shell/XML metacharacters is now rejected at
+    # construction time (allowlist), not merely XML-escaped at render time.
+    with pytest.raises(ValueError):
+        Schedule(
+            name="esc",
+            osint_bin="/usr/bin/osint",
+            command_args=["case", "resume", "<bad&slug>"],
+            every_hours=1,
+        )
+
+
+def test_render_launchd_plist_renders_safe_args():
     s = Schedule(
         name="esc",
         osint_bin="/usr/bin/osint",
-        command_args=["case", "resume", "<bad&slug>"],
+        command_args=["case", "resume", "good-slug_1"],
         every_hours=1,
     )
     out = render_launchd_plist(s)
-    assert "&lt;bad&amp;slug&gt;" in out
-    assert "<bad&slug>" not in out
+    assert "<string>good-slug_1</string>" in out
 
 
 # ---- systemd ---------------------------------------------------------------
@@ -141,7 +152,10 @@ def test_render_systemd_unit_with_cron():
         cron_expr="0 3 * * *",
     )
     _, tmr = render_systemd_unit(s)
-    assert "OnCalendar=0 3 * * *" in tmr
+    # WP-C: a raw cron string is NOT valid systemd OnCalendar syntax, so it is
+    # translated to calendar form (never emitted verbatim).
+    assert "OnCalendar=*-*-* 03:00:00" in tmr
+    assert "OnCalendar=0 3 * * *" not in tmr
     assert "OnUnitActiveSec" not in tmr
 
 

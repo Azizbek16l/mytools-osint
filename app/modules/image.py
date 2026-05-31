@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import stat as _stat
 import struct
 from collections.abc import AsyncIterator
+from urllib.parse import quote
 
 from app.core.classify import classify_exception, classify_http
 from app.core.http import get_client
@@ -29,6 +31,15 @@ from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
 NAME = "image"
 
 _MAX_BYTES = 25 * 1024 * 1024  # 25 MB hard cap on fetched payload
+
+# Image extensions we'll read off the local filesystem. A forced --kind image
+# must NOT let the module read arbitrary local files (/etc/passwd, secrets…),
+# so the local branch is gated on this allowlist regardless of the kind.
+_IMG_EXTS = frozenset({
+    ".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".gif", ".bmp", ".tif", ".tiff",
+    ".webp", ".heic", ".heif", ".avif", ".dng", ".cr2", ".nef", ".arw", ".raf",
+    ".orf", ".rw2", ".ico",
+})
 
 # IFD tag IDs we care about (TIFF spec + EXIF private IFD).
 _IFD0_TAGS = {
@@ -65,6 +76,12 @@ def _read_value(blob: bytes, ifd_off: int, entry_off: int,
     size = _TYPE_SIZE.get(ftype, 0)
     if size == 0:
         return None
+    # `count` is attacker-controlled (read straight from the file). Reject a
+    # count that can't possibly fit in the blob BEFORE computing nbytes or
+    # allocating anything downstream — a crafted 0xFFFFFFFF count would
+    # otherwise force a multi-MB struct format string + list in _decode.
+    if count <= 0 or count > len(blob):
+        return None
     nbytes = size * count
     if nbytes <= 4:
         raw = blob[entry_off + 8:entry_off + 8 + nbytes]
@@ -73,27 +90,31 @@ def _read_value(blob: bytes, ifd_off: int, entry_off: int,
             (val_off,) = struct.unpack_from(bo + "I", blob, entry_off + 8)
         except struct.error:
             return None
-        # offsets are relative to the start of the TIFF header (== blob)
-        start = ifd_off + val_off if False else val_off  # TIFF offsets are
-        # actually relative to the start of the TIFF header which is `blob[0]`,
-        # so val_off works directly as a slice index here.
+        # TIFF value offsets are relative to the start of the TIFF header,
+        # which is blob[0] here, so val_off is a direct slice index.
         start = val_off
-        if start + nbytes > len(blob):
+        if start < 0 or start + nbytes > len(blob):
             return None
         raw = blob[start:start + nbytes]
     return tag, ftype, count, raw
 
 
 def _decode(ftype: int, raw: bytes, count: int, bo: str):
+    # Never trust `count` to exceed what `raw` actually holds — cap it to the
+    # available bytes per element so the struct format string and the result
+    # list can't be inflated beyond the (already size-capped) payload.
     if ftype == 2:  # ASCII
         return raw.split(b"\x00", 1)[0].decode("utf-8", errors="replace").strip()
     if ftype == 3:  # SHORT
-        return list(struct.unpack(bo + ("H" * count), raw[:2 * count]))
+        n = min(count, len(raw) // 2)
+        return list(struct.unpack(bo + ("H" * n), raw[:2 * n]))
     if ftype == 4:  # LONG
-        return list(struct.unpack(bo + ("I" * count), raw[:4 * count]))
+        n = min(count, len(raw) // 4)
+        return list(struct.unpack(bo + ("I" * n), raw[:4 * n]))
     if ftype == 5:  # RATIONAL
+        n = min(count, len(raw) // 8)
         vals = []
-        for i in range(count):
+        for i in range(n):
             num, den = struct.unpack(bo + "II", raw[i * 8:i * 8 + 8])
             vals.append((num, den))
         return vals
@@ -106,7 +127,7 @@ def _walk_ifd(blob: bytes, ifd_off: int, bo: str,
               wanted: dict[int, str]) -> dict[str, object]:
     """Walk a single IFD and return {name: decoded_value} for tags in `wanted`."""
     out: dict[str, object] = {}
-    if ifd_off + 2 > len(blob):
+    if ifd_off < 0 or ifd_off + 2 > len(blob):
         return out
     try:
         (n_entries,) = struct.unpack_from(bo + "H", blob, ifd_off)
@@ -147,10 +168,19 @@ def _find_tiff(payload: bytes) -> tuple[bytes, int, str] | None:
             if marker == 0xDA or marker == 0xD9:  # SOS or EOI: no more meta
                 return None
             seg_len = int.from_bytes(payload[i + 2:i + 4], "big")
+            # A JPEG segment length includes its own 2 length bytes, so it must
+            # be >= 2. A crafted 0/1 would either stall (i unchanged) or
+            # under-advance; bail out rather than loop on malformed input.
+            if seg_len < 2:
+                return None
             if marker == 0xE1 and payload[i + 4:i + 10] == b"Exif\x00\x00":
                 tiff = payload[i + 10:i + 2 + seg_len]
                 break
-            i += 2 + seg_len
+            nxt = i + 2 + seg_len
+            # Guard against a segment that claims to run past the buffer.
+            if nxt <= i or nxt > len(payload):
+                return None
+            i = nxt
         else:
             return None
     elif payload[:2] in (b"II", b"MM"):
@@ -227,35 +257,98 @@ def parse_exif(payload: bytes) -> dict[str, object]:
 # ---- I/O ------------------------------------------------------------------
 
 async def _fetch_url(url: str) -> tuple[bytes, str]:
-    """Returns (payload, error). Empty payload + error str → fail."""
+    """Returns (payload, error). Empty payload + error str → fail.
+
+    Streams the body and stops once ``_MAX_BYTES`` is read, so a hostile image
+    host can't exhaust memory by returning a multi-hundred-MB response — we
+    never buffer more than the cap. Honours Content-Length too: an over-cap
+    declared length is rejected before any body is pulled.
+    """
     try:
         client = await get_client()
-        r = await client.get(url, timeout=30.0,
-                             headers={"Accept": "image/*"})
+        async with client.stream("GET", url, timeout=30.0,
+                                 headers={"Accept": "image/*"}) as r:
+            if r.status_code != 200:
+                await r.aclose()
+                return b"", f"HTTP {r.status_code}"
+            ct = r.headers.get("content-type", "").lower()
+            if ct and "image/" not in ct and ct != "application/octet-stream":
+                await r.aclose()
+                return b"", f"unexpected content-type: {ct}"
+            # Reject early if the server declares an over-cap length.
+            clen = r.headers.get("content-length")
+            if clen and clen.isdigit() and int(clen) > _MAX_BYTES:
+                await r.aclose()
+                return b"", f"image too large: {int(clen)} bytes > {_MAX_BYTES} cap"
+            chunks: list[bytes] = []
+            total = 0
+            async for chunk in r.aiter_bytes():
+                chunks.append(chunk)
+                total += len(chunk)
+                if total >= _MAX_BYTES:
+                    # Stop pulling; keep exactly the cap, drop the rest.
+                    break
+            payload = b"".join(chunks)[:_MAX_BYTES]
     except Exception as e:
         return b"", f"{type(e).__name__}: {e}"
-    if r.status_code != 200:
-        return b"", f"HTTP {r.status_code}"
-    ct = r.headers.get("content-type", "").lower()
-    if ct and "image/" not in ct and ct != "application/octet-stream":
-        return b"", f"unexpected content-type: {ct}"
-    payload = r.content[:_MAX_BYTES]
-    if len(r.content) > _MAX_BYTES:
-        return payload, ""  # truncated but usable
     return payload, ""
+
+
+def _read_local_image(value: str) -> tuple[bool, bytes, str]:
+    """Read a local image file safely. Returns (ok, payload, error).
+
+    Hardening (the local branch is reachable via a forced ``--kind image``,
+    so it must NOT become an arbitrary-file-read primitive):
+      * canonicalise the path (resolve symlinks / ``..``) with realpath;
+      * require an image extension from the allowlist;
+      * stat() and require a *regular* file (no /dev, FIFO, socket, dir);
+      * enforce the 25 MB cap on the stat size BEFORE opening;
+      * read at most ``_MAX_BYTES`` even so.
+
+    On refusal the error string is generic and does NOT echo the resolved
+    absolute path (which could leak filesystem layout for a path the caller
+    only guessed at).
+    """
+    try:
+        real = os.path.realpath(value)
+    except (OSError, ValueError):
+        return False, b"", "invalid path"
+    if not os.path.exists(real):
+        return False, b"", "path does not exist"
+    ext = os.path.splitext(real)[1].lower()
+    if ext not in _IMG_EXTS:
+        return False, b"", "not an image file (extension not in allowlist)"
+    try:
+        st = os.stat(real)
+    except OSError as e:
+        return False, b"", f"{type(e).__name__}: {e}"
+    if not _stat.S_ISREG(st.st_mode):
+        return False, b"", "not a regular file"
+    if st.st_size > _MAX_BYTES:
+        return False, b"", f"image too large: {st.st_size} bytes > {_MAX_BYTES} cap"
+    try:
+        with open(real, "rb") as f:
+            return True, f.read(_MAX_BYTES), ""
+    except Exception as e:
+        return False, b"", f"{type(e).__name__}: {e}"
 
 
 def _reverse_pivots(source_url: str | None) -> list[tuple[str, str, str]]:
     """Return (engine, url, detail) tuples — one per reverse-image-search engine."""
     if source_url:
+        # Percent-encode the source URL before embedding it in each engine's
+        # query string. Without this, a source URL's own '&', '#', '?' or '='
+        # escape into the outer query/fragment and break (or rewrite) the
+        # pivot URL.
+        enc = quote(source_url, safe="")
         return [
-            ("Google Lens", f"https://lens.google.com/uploadbyurl?url={source_url}",
+            ("Google Lens", f"https://lens.google.com/uploadbyurl?url={enc}",
              "drop into Google Lens for reverse-image-search"),
-            ("Bing Visual", f"https://www.bing.com/images/search?q=imgurl:{source_url}&view=detailv2&iss=sbi",
+            ("Bing Visual", f"https://www.bing.com/images/search?q=imgurl:{enc}&view=detailv2&iss=sbi",
              "Bing Visual Search via image URL"),
-            ("Yandex Images", f"https://yandex.com/images/search?rpt=imageview&url={source_url}",
+            ("Yandex Images", f"https://yandex.com/images/search?rpt=imageview&url={enc}",
              "Yandex Images reverse search"),
-            ("TinEye", f"https://www.tineye.com/search?url={source_url}",
+            ("TinEye", f"https://www.tineye.com/search?url={enc}",
              "TinEye reverse search"),
         ]
     return [
@@ -303,16 +396,7 @@ async def run(query: Query) -> AsyncIterator[Hit]:
             return
     else:
         # Local filesystem — keep blocking I/O off the event loop.
-        def _read_local(path: str) -> tuple[bool, bytes, str]:
-            if not os.path.exists(path):
-                return False, b"", "path does not exist"
-            try:
-                with open(path, "rb") as f:
-                    return True, f.read(_MAX_BYTES), ""
-            except Exception as e:
-                return False, b"", f"{type(e).__name__}: {e}"
-
-        ok, payload, err = await asyncio.to_thread(_read_local, value)
+        ok, payload, err = await asyncio.to_thread(_read_local_image, value)
         if not ok:
             status = HitStatus.NO_DATA if "does not exist" in err else HitStatus.ERROR
             yield Hit(module=NAME, source="fetch", category="image",

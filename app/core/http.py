@@ -12,14 +12,18 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 import os
 import random
+import time
 from typing import Any
 
 import httpx
 import ua_generator
 
 from .config import settings
+
+log = logging.getLogger("osint.http")
 
 _client: httpx.AsyncClient | None = None
 _lock = asyncio.Lock()
@@ -45,7 +49,10 @@ def _ip_is_internal(ip_str: str) -> bool:
     )
 
 
-_resolve_cache: dict[str, bool] = {}
+# host -> (blocked, expires_at_monotonic). Short TTL so a name that first
+# resolves public can't be cached as allowed indefinitely (DNS-rebind window).
+_resolve_cache: dict[str, tuple[bool, float]] = {}
+_RESOLVE_TTL_SEC = 30.0
 
 
 async def _host_blocked(host: str | None) -> bool:
@@ -56,6 +63,10 @@ async def _host_blocked(host: str | None) -> bool:
     Under OPSEC we do NOT resolve hostnames locally (would leak DNS) — only
     literal-IP internal targets are blocked there; the SOCKS proxy handles the
     rest.
+
+    Fails CLOSED: a resolution error in non-OPSEC mode blocks the request
+    (a name we can't validate is treated as unsafe). Resolution results are
+    memoised with a short TTL to keep the DNS-rebind window tight.
     """
     if not host or _allow_private():
         return False
@@ -67,15 +78,19 @@ async def _host_blocked(host: str | None) -> bool:
         pass
     if _opsec_on():
         return False  # don't leak DNS; proxy resolves the hostname
-    if host in _resolve_cache:
-        return _resolve_cache[host]
-    blocked = False
+    now = time.monotonic()
+    cached = _resolve_cache.get(host)
+    if cached is not None and cached[1] > now:
+        return cached[0]
     try:
         infos = await asyncio.get_running_loop().getaddrinfo(host, None)
         blocked = any(_ip_is_internal(info[4][0]) for info in infos)
-    except Exception:
-        blocked = False
-    _resolve_cache[host] = blocked
+    except Exception as e:
+        # FAIL CLOSED: a name we can't resolve is one we can't prove is safe.
+        # Do NOT cache the failure (it may be transient) and do NOT allow it.
+        log.warning("SSRF guard: resolution failed for %r, blocking: %s", host, e)
+        return True
+    _resolve_cache[host] = (blocked, now + _RESOLVE_TTL_SEC)
     return blocked
 
 
@@ -254,23 +269,10 @@ async def request(
     """One-shot request with light retry. Returns None on terminal failure.
 
     GET requests are served from the SQLite HTTP cache when OSINT_CACHE=1.
+    The cache read/write lives entirely in :class:`_CacheTransport` (which the
+    singleton client installs), so it covers redirect hops and direct
+    ``client.request`` callers too — we do NOT duplicate it here.
     """
-    # Cache lookup (GET only, when enabled)
-    if method.upper() == "GET":
-        try:
-            from app.core import cache as _cache
-            if _cache.is_enabled():
-                cached = await _cache.get(method, url)
-                if cached is not None:
-                    return httpx.Response(
-                        status_code=cached["status"],
-                        headers=cached["headers"],
-                        content=cached["body"],
-                        request=httpx.Request(method, url),
-                    )
-        except Exception:
-            pass
-
     client = await get_client()
     last_exc: Exception | None = None
     for attempt in range(retries + 1):
@@ -285,27 +287,24 @@ async def request(
             if resp.status_code >= 500 and attempt < retries:
                 await asyncio.sleep(backoff * (2**attempt) + random.uniform(0, 0.2))
                 continue
-            # Cache successful GET responses
-            if method.upper() == "GET" and 200 <= resp.status_code < 400:
-                try:
-                    from app.core import cache as _cache
-                    if _cache.is_enabled():
-                        await _cache.put(method, url, resp.status_code,
-                                         dict(resp.headers), resp.content)
-                except Exception:
-                    pass
+            # Caching of successful GETs happens in _CacheTransport.
             return resp
         except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as e:
             last_exc = e
             if attempt < retries:
                 await asyncio.sleep(backoff * (2**attempt) + random.uniform(0, 0.2))
                 continue
+            log.debug("request %s %s failed (transport): %s", method, url, e)
             return None
-        except Exception as e:  # pragma: no cover
+        except Exception as e:
+            # Distinguish a real bug (bad kwarg, JSON error) from a transient
+            # transport issue — log it instead of swallowing silently.
             last_exc = e
+            log.warning("request %s %s failed (unexpected): %s", method, url, e,
+                        exc_info=True)
             return None
     if last_exc:
-        return None
+        log.debug("request %s %s exhausted retries: %s", method, url, last_exc)
     return None
 
 

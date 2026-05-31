@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -34,6 +35,119 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_\-]{1,63}$")
+
+# A scan target / scheduled-job argument may only contain this restricted
+# alphabet — enough for domains, IPs, emails, usernames, hashes, wallet
+# addresses and flag tokens, but NOT shell metacharacters, whitespace runs or
+# any control byte. Anything outside it is rejected before it can be rendered
+# into a systemd unit / crontab line / launchd plist / schtasks XML, where a
+# newline or `;`/`|`/`$(...)` would otherwise become persistent code execution.
+_ARG_RE = re.compile(r"^[A-Za-z0-9._@:+/=-]{1,256}$")
+
+# Single-line cron / OnCalendar grammar: 5 (or 6/7) whitespace-separated
+# fields, each drawn from digits, ``* , / -`` and a couple of name chars
+# (for systemd day-of-week tokens). No newline, no shell metacharacters.
+_CRON_FIELD = r"[0-9A-Za-z*,/-]+"
+_CRON_RE = re.compile(r"^" + _CRON_FIELD + r"(?:[ \t]+" + _CRON_FIELD + r"){4,6}$")
+
+# Reserved tokens / characters that must never reach a generated job spec.
+_FORBIDDEN_CHARS = set(";|&`$<>\n\r\t\\\"'(){}[]!*?~ ")
+
+
+def _validate_arg(arg: str) -> None:
+    """Raise ValueError if ``arg`` is unsafe to place in a generated job spec.
+
+    A scheduled job spec (systemd ExecStart, crontab line, launchd argv,
+    schtasks <Arguments>) is executed by a shell on at least one platform, so
+    every argument must be free of shell metacharacters, control bytes and
+    newlines. We allowlist a strict character set rather than blocklist — a
+    blocklist always misses something.
+    """
+    if not isinstance(arg, str):
+        raise ValueError(f"command arg must be a string, got {type(arg).__name__}")
+    if not arg:
+        raise ValueError("command arg must be non-empty")
+    if "\n" in arg or "\r" in arg or "\x00" in arg:
+        raise ValueError(f"command arg {arg!r} contains a newline/NUL")
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in arg):
+        raise ValueError(f"command arg {arg!r} contains a control character")
+    # Flag tokens (``--profile``) are allowed; values must match the allowlist.
+    if arg.startswith("-"):
+        body = arg.lstrip("-")
+        if not body or not _ARG_RE.match(body):
+            raise ValueError(f"command arg {arg!r} has an unsafe flag shape")
+        return
+    if not _ARG_RE.match(arg):
+        bad = sorted({c for c in arg if c in _FORBIDDEN_CHARS} or {arg[0]})
+        raise ValueError(
+            f"command arg {arg!r} contains characters outside the allowlist "
+            f"[A-Za-z0-9._@:+/=-] (offending: {bad!r})"
+        )
+
+
+def _validate_cron(expr: str) -> None:
+    """Raise ValueError if ``expr`` isn't a safe single-line cron expression."""
+    if not isinstance(expr, str) or not expr.strip():
+        raise ValueError("cron expression must be a non-empty string")
+    if "\n" in expr or "\r" in expr or "\x00" in expr:
+        raise ValueError("cron expression must be a single line (no newline/NUL)")
+    if not _CRON_RE.match(expr.strip()):
+        raise ValueError(
+            f"cron expression {expr!r} is not a valid 5-7 field cron line "
+            "(digits, '* , / -' only)"
+        )
+
+
+def _cron_to_oncalendar(expr: str) -> str:
+    """Translate a 5-field ``M H DOM MON DOW`` cron expr to a systemd
+    ``OnCalendar=`` value, or raise ValueError if it can't be translated.
+
+    A raw cron string is NOT valid systemd OnCalendar syntax, so emitting it
+    verbatim produces a timer that fails to load at daemon-reload. We support
+    the common cases (fixed minute/hour, optional day-of-week) and refuse the
+    rest rather than emit a broken unit.
+    """
+    fields = expr.strip().split()
+    if len(fields) != 5:
+        raise ValueError(
+            "systemd OnCalendar translation supports only 5-field cron "
+            f"expressions; got {len(fields)} fields in {expr!r}"
+        )
+    minute, hour, dom, mon, dow = fields
+
+    def _fixed(val: str, lo: int, hi: int) -> int:
+        if not val.isdigit():
+            raise ValueError(
+                f"cron field {val!r} must be a fixed integer for systemd "
+                "(ranges/steps/lists are not translated — use --every Nh)"
+            )
+        n = int(val)
+        if not (lo <= n <= hi):
+            raise ValueError(f"cron field {val!r} out of range [{lo}-{hi}]")
+        return n
+
+    if dom != "*" or mon != "*":
+        raise ValueError(
+            "systemd OnCalendar translation supports only day-of-week "
+            "scheduling (day-of-month / month must be '*'); use --every Nh"
+        )
+    mm = _fixed(minute, 0, 59)
+    hh = _fixed(hour, 0, 23)
+    _DOW = {
+        "0": "Sun", "7": "Sun", "1": "Mon", "2": "Tue", "3": "Wed",
+        "4": "Thu", "5": "Fri", "6": "Sat",
+    }
+    if dow == "*":
+        return f"*-*-* {hh:02d}:{mm:02d}:00"
+    days = []
+    for tok in dow.split(","):
+        if tok not in _DOW:
+            raise ValueError(
+                f"cron day-of-week {tok!r} must be 0-7 (single or comma list) "
+                "for systemd OnCalendar translation"
+            )
+        days.append(_DOW[tok])
+    return f"{','.join(days)} *-*-* {hh:02d}:{mm:02d}:00"
 
 
 @dataclass(slots=True)
@@ -65,6 +179,19 @@ class Schedule:
             raise ValueError("must set either every_hours or cron_expr")
         if self.every_hours is not None and self.every_hours < 1:
             raise ValueError("every_hours must be >= 1")
+        # SECURITY: validate every command argument and the cron expression
+        # at construction time, so no unsafe value can ever reach a renderer.
+        # A newline / `;` / `$(...)` here would otherwise be persisted as an
+        # extra systemd directive or crontab line and executed by a shell.
+        for arg in self.command_args:
+            _validate_arg(arg)
+        if self.cron_expr is not None:
+            _validate_cron(self.cron_expr)
+        # description lands in systemd ``Description=`` (a single-line key) and
+        # the schtasks XML; collapse any newline/control char so it can't add
+        # a stray directive.
+        if "\n" in self.description or "\r" in self.description:
+            self.description = self.description.replace("\n", " ").replace("\r", " ")
 
     # ---- canonical label/id helpers ---------------------------------------
 
@@ -133,14 +260,17 @@ def render_systemd_unit(s: Schedule) -> tuple[str, str]:
     """Return (service_unit, timer_unit). One systemd timer + a service
     pair, both per-user.
 
-    Timer keys: ``OnCalendar=`` if a cron-ish expression is provided
-    (translated via simple rules), else ``OnUnitActiveSec=`` for the
-    hourly interval. We err on the side of keeping the user's cron string
-    as ``OnCalendar=<expr>`` — systemd accepts a subset and rejects the
-    rest at unit-load time (not our problem to translate the full
-    grammar).
+    Timer keys: ``OnCalendar=`` if a cron expression is provided (translated
+    to systemd calendar syntax via :func:`_cron_to_oncalendar` — a raw cron
+    string is NOT valid OnCalendar and would fail to load), else
+    ``OnUnitActiveSec=`` for the hourly interval. Untranslatable cron
+    expressions raise ValueError rather than emit a broken unit.
     """
-    cmd = " ".join([s.osint_bin, *s.command_args])
+    # Quote every argv element. systemd parses ExecStart with shell-like
+    # tokenisation, so an un-quoted space/metachar would split or inject. The
+    # values are already allowlist-validated in __post_init__; the quoting is
+    # defence-in-depth so a value containing '=' or '/' renders as one token.
+    cmd = " ".join(shlex.quote(a) for a in [s.osint_bin, *s.command_args])
     service = (
         f"[Unit]\nDescription=osint schedule: {s.name}\n\n"
         "[Service]\nType=oneshot\n"
@@ -150,8 +280,9 @@ def render_systemd_unit(s: Schedule) -> tuple[str, str]:
     if s.every_hours is not None:
         ts = f"OnUnitActiveSec={s.every_hours}h\nOnBootSec=5min\n"
     else:
-        # systemd OnCalendar — pass user expression through verbatim.
-        ts = f"OnCalendar={s.cron_expr}\n"
+        # Translate cron → OnCalendar (or raise). cron_expr was already
+        # grammar-validated in __post_init__.
+        ts = f"OnCalendar={_cron_to_oncalendar(s.cron_expr or '')}\n"
     timer = (
         f"[Unit]\nDescription=osint timer: {s.name}\n\n"
         "[Timer]\n"
@@ -172,17 +303,31 @@ def render_cron_snippet(s: Schedule) -> str:
     the kind of surprise this tool should never spring.
     """
     if s.cron_expr:
-        sched = s.cron_expr
+        # Already grammar-validated in __post_init__ — single line, no shell
+        # metacharacters — so it's safe to emit as the schedule field.
+        sched = s.cron_expr.strip()
     else:
         h = s.every_hours or 1
         if h == 1:
             sched = "0 * * * *"
         elif h <= 24:
             sched = f"0 */{h} * * *"
+        elif h % 24 == 0:
+            # Exact multiple of a day → run every N days at midnight.
+            sched = f"0 0 */{h // 24} * *"
         else:
-            # > 24h: spread across multiple days at midnight
-            sched = f"0 0 */{max(1, h // 24)} * *"
-    cmd = " ".join([s.osint_bin, *s.command_args])
+            # Non-multiple-of-24 hour values don't map to a single cron field
+            # without silently dropping the remainder (25h -> */1 == daily).
+            # Refuse rather than reschedule the user behind their back.
+            raise ValueError(
+                f"every_hours={h} is >24 but not a multiple of 24; cron cannot "
+                "express it without changing the cadence — use a value like 48 "
+                "(2 days) or a systemd/launchd interval instead"
+            )
+    # shlex.quote each argv element: cron runs the line via /bin/sh, so an
+    # un-quoted ';' or '|' would be interpreted. Values are allowlist-validated
+    # in __post_init__; quoting is defence-in-depth.
+    cmd = " ".join(shlex.quote(a) for a in [s.osint_bin, *s.command_args])
     return f"# osint schedule: {s.name}\n{sched} {cmd}\n"
 
 
@@ -467,7 +612,8 @@ def cmd_schedule(argv: list[str]) -> int:
         print(
             "usage:\n"
             "  osint schedule install <slug-or-target> --every <Nh|cron> "
-            "[--profile NAME] [--dry-run]\n"
+            "[--profile NAME] [--apply]\n"
+            "    (preview by default; pass --apply to actually write + enable)\n"
             "  osint schedule list\n"
             "  osint schedule remove <name>\n\n"
             "  install: emits a launchd plist / systemd unit / Task Scheduler XML\n"
@@ -509,7 +655,13 @@ def cmd_schedule(argv: list[str]) -> int:
         rest = argv[2:]
         every: str | None = None
         profile: str | None = None
-        dry = False
+        # Installing a persistent OS job is a privileged side effect, so we
+        # default to a SAFE PREVIEW (dry-run): render + show the exact command
+        # the timer will run, but write nothing. The user must pass --apply
+        # (or --confirm) to actually write + enable. --dry-run is still
+        # accepted for backward compatibility (it's the default now).
+        dry = True
+        apply_requested = False
         i = 0
         while i < len(rest):
             if rest[i] == "--every" and i + 1 < len(rest):
@@ -518,7 +670,11 @@ def cmd_schedule(argv: list[str]) -> int:
                 profile = rest[i + 1]; i += 2; continue
             if rest[i] == "--dry-run":
                 dry = True; i += 1; continue
+            if rest[i] in ("--apply", "--confirm"):
+                apply_requested = True; i += 1; continue
             i += 1
+        if apply_requested:
+            dry = False
         if not every:
             print("--every <Nh|cron> is required", file=sys.stderr)
             return 2
@@ -549,6 +705,10 @@ def cmd_schedule(argv: list[str]) -> int:
 
         info = install_schedule(s, dry_run=dry)
         print(f"  platform:        {info['platform']}")
+        # Echo the exact command the scheduled job will run — what actually
+        # executes on a timer, after our quoting.
+        print("  will run:        "
+              + " ".join(shlex.quote(a) for a in [s.osint_bin, *s.command_args]))
         for p in info.get("unit_paths") or []:
             print(f"  unit:            {p}")
         if "cron_snippet" in info:
@@ -561,7 +721,8 @@ def cmd_schedule(argv: list[str]) -> int:
         print(f"  deactivate:      {info['deactivate_cmd']}")
         print()
         if dry:
-            print("  (dry-run; nothing written)")
+            print("  (preview only — nothing written. Re-run with --apply to "
+                  "write + enable this schedule.)")
         elif info.get("executed"):
             print("  installed + enabled.")
         elif info["platform"] != "cron":
