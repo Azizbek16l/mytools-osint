@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import asyncio
 import difflib
-import ipaddress
 import json
 import re
 import webbrowser
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path as _Path
 
 import questionary
 from prompt_toolkit.styles import Style as PStyle
@@ -66,37 +66,38 @@ KIND_LABELS = {
     QueryKind.IP:       f"{tokens.ICON_IP}  ip / host — IPinfo + reverse DNS",
 }
 
-_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
-_PHONE_RE = re.compile(r"^\+?[0-9 ()\-]{6,}$")
-_DOMAIN_RE = re.compile(
-    r"^[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?"
-    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)+$"
-)
-
-
 def _auto_kind(value: str) -> QueryKind | None:
-    """Infer query kind from value. None if ambiguous."""
+    """Infer query kind from value for the chat shell. None if ambiguous.
+
+    Delegates the routing decision to the SINGLE canonical inferer
+    (:func:`app.core.infer.infer_kind`) so wallet/hash/image/IP ordering can
+    never drift from cli.py. Two chat-shell-specific behaviours are layered
+    explicitly on top:
+
+      1. A leading ``@`` means TELEGRAM here (the canonical maps it to the
+         generic USERNAME). This is an *intentional* fork for the interactive
+         shell — kept as an explicit, commented branch, not a silent copy.
+      2. ``None`` (ambiguous → show the kind picker) is returned when the
+         canonical fell through to its USERNAME *catch-all* for something that
+         isn't a plausible bare handle (e.g. ``a`` or ``foo bar``). The CLI
+         always commits to USERNAME; the interactive shell prefers to ask.
+    """
+    from app.core.infer import infer_kind as _canonical_infer_kind
+
     v = value.strip()
     if not v:
         return None
-    # IPv4 / IPv6 first (otherwise IPv6 falls through to USERNAME).
-    try:
-        ipaddress.ip_address(v.split("/", 1)[0])
-        return QueryKind.IP
-    except ValueError:
-        pass
-    if _EMAIL_RE.match(v):
-        return QueryKind.EMAIL
-    digits = re.sub(r"\D", "", v)
-    if _PHONE_RE.match(v) and 6 <= len(digits) <= 16:
-        return QueryKind.PHONE
+    # (1) Explicit chat-shell override: '@handle' → TELEGRAM (canonical = USERNAME).
     if v.startswith("@"):
         return QueryKind.TELEGRAM
-    if "." in v and _DOMAIN_RE.match(v):
-        return QueryKind.DOMAIN
-    if re.match(r"^[A-Za-z0-9_\-]{2,}$", v):
-        return QueryKind.USERNAME
-    return None  # ambiguous
+    kind = _canonical_infer_kind(v)
+    # (2) Distinguish a *real* bare-username match from the canonical catch-all.
+    # The canonical returns USERNAME both for valid handles and as a final
+    # fallback; the chat shell only auto-commits to USERNAME for a plausible
+    # handle and otherwise asks (returns None → picker).
+    if kind == QueryKind.USERNAME and not re.match(r"^[A-Za-z0-9_\-]{2,}$", v):
+        return None
+    return kind
 
 
 def _print_compact() -> None:
@@ -170,6 +171,88 @@ async def show_help(screen: str = "main") -> None:
         rows.append(f"  {label}\n", style=tokens.FG)
     rows.append("   " + ("─" * 60) + "\n", style=tokens.DIM)
     rows.append("   Esc / ← always returns one level up\n", style=tokens.DIM)
+    console.print(rows)
+
+
+# Chat-shell /help groups — canonical slash names by theme. Built from
+# lookup_input.SLASH_ALIASES + SLASH_DESCRIPTIONS so the help can never drift
+# from the dispatcher / completer.
+_CHAT_HELP_GROUPS: list[tuple[str, tuple[str, ...]]] = [
+    ("lookup",        ("kind", "history", "export")),
+    ("shell",         ("help", "clear", "version", "quit")),
+    ("config",        ("settings", "profile", "theme", "modules", "sites")),
+    ("investigate",   ("graph", "case", "rules", "playbook", "diff", "watch")),
+    ("AI / OPSEC",    ("agent", "explain", "pattern", "opsec")),
+    ("ops",           ("schedule", "doctor")),
+]
+
+
+async def _show_chat_help() -> None:
+    """v4.3 chat-shell help — teach the real slash-command + chat workflow.
+
+    Replaces the legacy single-letter menu cheatsheet (L/H/M/S/…), which was
+    the wrong vocabulary for the chat prompt. Rendered from the canonical
+    SLASH_ALIASES catalogue so the primary spelling + one-line description per
+    command always matches the dispatcher and tab-completion.
+    """
+    from app.ui.lookup_input import SLASH_ALIASES, SLASH_DESCRIPTIONS
+
+    rows = Text("\n")
+    rows.append("   mytools-osint — chat shell\n", style=f"bold {tokens.ACCENT}")
+    rows.append(
+        "   type a target (auto-detect) to scan · use /commands for everything else\n",
+        style=tokens.DIM,
+    )
+    rows.append("   " + ("─" * 64) + "\n", style=tokens.DIM)
+    seen: set[str] = set()
+    for group, names in _CHAT_HELP_GROUPS:
+        rows.append(f"   {group}\n", style=f"bold {tokens.FG}")
+        for name in names:
+            aliases = SLASH_ALIASES.get(name)  # type: ignore[arg-type]
+            if not aliases:
+                continue
+            seen.add(name)
+            primary = aliases[0]
+            extra = (
+                "  (" + ", ".join(aliases[1:]) + ")" if len(aliases) > 1 else ""
+            )
+            desc = SLASH_DESCRIPTIONS.get(name, "")  # type: ignore[arg-type]
+            rows.append(f"     {primary:<11}", style=f"bold {tokens.ACCENT}")
+            rows.append(f" {desc}", style=tokens.FG)
+            rows.append(f"{extra}\n", style=tokens.DIM)
+        rows.append("\n")
+    # Any catalogue entry not placed in a group above (forward-compat safety).
+    leftover = [n for n in SLASH_ALIASES if n not in seen]
+    if leftover:
+        rows.append("   more\n", style=f"bold {tokens.FG}")
+        for name in leftover:
+            primary = SLASH_ALIASES[name][0]  # type: ignore[index]
+            rows.append(f"     {primary:<11}", style=f"bold {tokens.ACCENT}")
+            rows.append(f" {SLASH_DESCRIPTIONS.get(name, '')}\n",  # type: ignore[arg-type]
+                        style=tokens.FG)
+        rows.append("\n")
+    rows.append("   " + ("─" * 64) + "\n", style=tokens.DIM)
+    rows.append("   keys", style=f"bold {tokens.FG}")
+    rows.append("   Tab", style=f"bold {tokens.ACCENT}")
+    rows.append(" complete  ", style=tokens.DIM)
+    rows.append("→", style=f"bold {tokens.ACCENT}")
+    rows.append(" ghost text  ", style=tokens.DIM)
+    rows.append("Ctrl-R", style=f"bold {tokens.ACCENT}")
+    rows.append(" history  ", style=tokens.DIM)
+    rows.append("Alt+Enter / ,", style=f"bold {tokens.ACCENT}")
+    rows.append(" burst multiple targets\n", style=tokens.DIM)
+    rows.append(
+        "   The Wave D verbs (/case /rules /playbook /diff /watch /schedule "
+        "/doctor) run the same\n"
+        "   handlers as `osint <verb> …` on the command line — pass args "
+        "exactly as you would there,\n"
+        "   e.g. /case new acme --target acme.com --kind domain.\n",
+        style=tokens.DIM,
+    )
+    rows.append(
+        "   Prefer the classic single-key menu?  Restart with `osint --classic`.\n",
+        style=tokens.DIM,
+    )
     console.print(rows)
 
 
@@ -836,21 +919,33 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
         suggest_slash_for_typo,
     )
 
-    # v4.3: the pre-prompt block was three lines (heading + examples + tips).
-    # We print the examples + tips ONCE per session (when no history yet),
-    # then rely on the always-visible bottom toolbar to surface affordances
-    # on every subsequent prompt — exactly like Claude Code.
+    # v4.3: the pre-prompt block (examples + Tab/ghost/Ctrl-R/help/quit tips)
+    # is shown ONCE on the FIRST prompt of each session — for new AND returning
+    # users (history is non-empty forever after the first ever query, so gating
+    # on history alone meant rusty returners never saw the affordances again).
+    # New users also get the worked examples; returning users get a shorter
+    # "welcome back" affordance line above the tips. The always-visible bottom
+    # toolbar carries the per-prompt cue on every subsequent prompt.
     history = build_history()
     _has_any_history = any(True for _ in history.load_history_strings())
-    if not _has_any_history and not _CHAT_STATE.get("_pre_prompt_shown"):
+    if not _CHAT_STATE.get("_pre_prompt_shown"):
         _CHAT_STATE["_pre_prompt_shown"] = True
         console.print()
-        examples = Text("   ")
-        examples.append("examples:  ", style=tokens.DIM)
-        for e in ("temur", "satya@microsoft.com", "+998 90 123 45 67", "@durov", "github.com"):
-            examples.append(e, style=tokens.ACCENT)
-            examples.append("   ", style=tokens.DIM)
-        console.print(examples)
+        if _has_any_history:
+            wb = Text("   ")
+            wb.append("welcome back", style=f"bold {tokens.ACCENT}")
+            wb.append(" — type a target to scan, or ", style=tokens.DIM)
+            wb.append("/help", style=f"bold {tokens.ACCENT}")
+            wb.append(" for the command list", style=tokens.DIM)
+            console.print(wb)
+        else:
+            examples = Text("   ")
+            examples.append("examples:  ", style=tokens.DIM)
+            for e in ("temur", "satya@microsoft.com", "+998 90 123 45 67",
+                      "@durov", "github.com"):
+                examples.append(e, style=tokens.ACCENT)
+                examples.append("   ", style=tokens.DIM)
+            console.print(examples)
         tips = Text("   ")
         for label, key in (("Tab", "complete"), ("→", "ghost text"),
                            ("Ctrl-R", "history"), ("/help", "commands"),
@@ -955,7 +1050,7 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
         if action.action == "quit":
             return False
         if action.action == "help":
-            await show_help("main")
+            await _show_chat_help()
             return await action_lookup(db)
         if action.action == "clear":
             console.clear()
@@ -1024,6 +1119,11 @@ async def action_lookup(db: Database, *, kind_override: QueryKind | None = None)
             return await action_lookup(db)
         if action.action == "agent":
             await _slash_agent(action.arg)
+            return await action_lookup(db)
+        # ---- Wave D verbs — thin wrappers over the existing CLI handlers --
+        if action.action in ("case", "rules", "playbook", "schedule",
+                             "diff", "watch", "doctor"):
+            await _slash_cli_verb(action.action, action.arg)
             return await action_lookup(db)
         # unknown — print the dispatcher's did-you-mean hint and loop
         if action.message:
@@ -1533,6 +1633,85 @@ def _render_did_you_mean(
     )
 
 
+EXPORT_FORMATS = ("csv", "json", "jsonl", "md", "html")
+
+
+def export_hits(
+    query: Query,
+    hits: list[Hit],
+    fmt: str,
+    *,
+    elapsed_ms: int = 0,
+    path: str | _Path | None = None,
+) -> _Path:
+    """Serialise a scan to ``fmt`` and write it to disk; return the path.
+
+    Single source of truth for BOTH the menu export (``action_export``) and
+    the chat-shell ``/export``. Standardises on:
+
+      * ``exports_dir`` for the default location (not cwd) with a sanitised,
+        timestamped filename;
+      * pydantic ``model_dump(mode="json")`` for json/jsonl (Hit is a pydantic
+        model — there is no ``to_dict``; the old ``__dict__`` fallback leaked
+        private pydantic state);
+      * the canonical ``render_report`` / ``render_markdown`` for html/md,
+        which take a ``QueryResult`` (the old ``from … import render`` names
+        did not exist — html/md export raised ImportError).
+
+    Raises ``ValueError`` for an unknown format.
+    """
+    fmt = (fmt or "").lower()
+    if fmt not in EXPORT_FORMATS:
+        raise ValueError(f"unknown format {fmt!r} — use {' | '.join(EXPORT_FORMATS)}")
+
+    if path is not None:
+        out = _Path(path)
+    else:
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        out_dir = settings().exports_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        safe_value = re.sub(r"[^A-Za-z0-9_.+@-]", "_", query.value)[:60]
+        out = out_dir / f"osint-{query.kind.value}-{safe_value}-{ts}.{fmt}"
+    if out.parent:
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+    if fmt == "csv":
+        import csv as _csv
+        with out.open("w", encoding="utf-8", newline="") as f:
+            w = _csv.writer(f)
+            w.writerow(["module", "source", "category", "status", "title",
+                        "detail", "url", "severity", "latency_ms"])
+            for h in hits:
+                w.writerow([h.module, h.source, h.category, h.status.value,
+                            h.title, h.detail, h.url, h.severity.value, h.latency_ms])
+    elif fmt == "json":
+        payload = {
+            "query": query.model_dump(mode="json"),
+            "hits": [h.model_dump(mode="json") for h in hits],
+            "exported_at": datetime.now().isoformat(),
+        }
+        out.write_text(
+            json.dumps(payload, indent=2, default=str, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    elif fmt == "jsonl":
+        with out.open("w", encoding="utf-8") as f:
+            for h in hits:
+                f.write(json.dumps(h.model_dump(mode="json"),
+                                   default=str, ensure_ascii=False) + "\n")
+    elif fmt == "html":
+        from app.core.types import QueryResult
+        from app.ui.html_report import render_report
+        result = QueryResult(query=query, hits=list(hits))
+        out.write_text(render_report(query, result, elapsed_ms), encoding="utf-8")
+    else:  # md
+        from app.core.types import QueryResult
+        from app.ui.md_report import render_markdown
+        result = QueryResult(query=query, hits=list(hits))
+        out.write_text(render_markdown(query, result, elapsed_ms), encoding="utf-8")
+    return out
+
+
 async def action_export(query: Query, hits: list[Hit]) -> None:
     fmt = await questionary.select(
         "format?",
@@ -1540,46 +1719,15 @@ async def action_export(query: Query, hits: list[Hit]) -> None:
             Choice("csv  (one row per hit)",     value="csv",  shortcut_key="c"),
             Choice("json (full payload)",        value="json", shortcut_key="n"),  # 'j' is vim-nav
             Choice("md   (positives only)",      value="md",   shortcut_key="m"),
+            Choice("html (full report)",         value="html", shortcut_key="h"),
             Choice("← cancel",                   value=""),
         ],
         style=QSTYLE, use_shortcuts=True,
     ).ask_async()
     if not fmt:
         return
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_dir = settings().exports_dir
-    out_dir.mkdir(parents=True, exist_ok=True)
-    safe_value = re.sub(r"[^A-Za-z0-9_.+@-]", "_", query.value)[:60]
-    path = out_dir / f"osint-{query.kind.value}-{safe_value}-{ts}.{fmt}"
     try:
-        if fmt == "csv":
-            import csv as _csv
-            with path.open("w", encoding="utf-8", newline="") as f:
-                w = _csv.writer(f)
-                w.writerow(["module", "source", "category", "status", "title",
-                            "detail", "url", "severity", "latency_ms"])
-                for h in hits:
-                    w.writerow([h.module, h.source, h.category, h.status.value,
-                                h.title, h.detail, h.url, h.severity.value, h.latency_ms])
-        elif fmt == "json":
-            payload = {
-                "query": query.model_dump(mode="json"),
-                "hits": [h.model_dump(mode="json") for h in hits],
-                "exported_at": datetime.now().isoformat(),
-            }
-            path.write_text(
-                json.dumps(payload, indent=2, default=str, ensure_ascii=False),
-                encoding="utf-8",
-            )
-        else:
-            lines = [f"# OSINT report — {query.kind.value}: `{query.value}`", ""]
-            lines.append(f"_Generated {datetime.now().isoformat(timespec='seconds')}_  \n")
-            pos = [h for h in hits if h.status == HitStatus.FOUND]
-            lines.append(f"**{len(pos)} positives / {len(hits)} probes**\n")
-            lines.append("## Positives")
-            for h in pos:
-                lines.append(f"- **{h.source}** — {h.detail}  \n  {h.url}")
-            path.write_text("\n".join(lines), encoding="utf-8")
+        path = export_hits(query, hits, fmt)
         console.print(f"[{tokens.OK}]saved →[/] [bold]{path}[/]")
     except Exception as e:
         console.print(f"[{tokens.BAD}]export failed:[/] {e}")
@@ -1782,6 +1930,9 @@ _CHAT_STATE: dict[str, object] = {
     "pattern": "exec-summary",
     # Wave B — remember last typed target so `/agent` (no arg) can default to it
     "last_target": "",
+    # Wave B — agent approval posture for this session. False = confirm each
+    # plan (the CLI default); True = auto-approve (set via `/agent auto`).
+    "agent_auto_approve": False,
 }
 
 
@@ -1881,13 +2032,30 @@ def _slash_pattern(arg: str) -> None:
 
 
 async def _slash_agent(arg: str) -> None:
-    """`/agent [target]` — run the Wave B ReAct loop in the chat shell.
+    """`/agent [target] [--yes|--no-approve]` — run the Wave B ReAct loop.
 
-    With no arg, falls back to the last typed value (which is usually the most
-    recent scan target). The loop is auto-approved here — the toolbar shows
-    progress; the analyst can Ctrl-C to cancel.
+    With no target, falls back to the last typed value (usually the most recent
+    scan target).
+
+    Approval posture matches the CLI (`osint agent`): the model emits a one-line
+    PLAN and we require an inline y/N approval BEFORE any tool runs (and before
+    we spend LLM tokens on tool execution). Opt out per-call with `--yes` /
+    `--no-approve`, or for the whole session with `/agent auto` (toggle back
+    with `/agent confirm`). This closes the old gap where the chat shell
+    auto-approved silently while the CLI prompted.
     """
-    target = (arg or "").strip() or str(_CHAT_STATE.get("last_target") or "")
+    parts = (arg or "").split()
+    no_approve = any(p in ("--yes", "-y", "--no-approve") for p in parts)
+    rest = [p for p in parts if p not in ("--yes", "-y", "--no-approve")]
+
+    # Session-level toggle: `/agent auto` / `/agent confirm`.
+    if rest and rest[0] in ("auto", "confirm"):
+        _CHAT_STATE["agent_auto_approve"] = (rest[0] == "auto")
+        state = "AUTO-APPROVE" if _CHAT_STATE["agent_auto_approve"] else "CONFIRM (y/N)"
+        console.print(f"   [{tokens.ACCENT}]agent approval → {state}[/]")
+        return
+
+    target = " ".join(rest).strip() or str(_CHAT_STATE.get("last_target") or "")
     if not target:
         console.print(
             f"   [{tokens.WARN}]/agent: no target — type one first, or `/agent <target>`[/]",
@@ -1926,14 +2094,38 @@ async def _slash_agent(arg: str) -> None:
         suffix = f"  [{tokens.DIM}]{n_tok}t[/]" if n_tok else ""
         console.print(f"   [{tokens.DIM}]·[/] {badge}  {snippet}{suffix}")
 
+    # Inline approver — surfaces the plan, defaults to reject (same as CLI).
+    async def _approve(plan: str) -> bool:
+        console.print(f"   [bold {tokens.ACCENT}]agent plan:[/] {plan}")
+        try:
+            return bool(await questionary.confirm(
+                "approve this plan and let the agent run its tools?",
+                default=False, style=QSTYLE,
+            ).ask_async())
+        except Exception:
+            return False
+
+    # Skip the prompt only if the caller opted out (--yes) or the session is in
+    # auto mode. Default = confirm, identical to the CLI default.
+    auto = no_approve or bool(_CHAT_STATE.get("agent_auto_approve"))
+    approve = None if auto else _approve
+    if auto:
+        console.print(
+            f"   [{tokens.DIM}]up to 8 steps / 4000 tokens via the active provider · "
+            f"auto-approved · Ctrl-C to cancel[/]",
+        )
+
     loop = AgentLoop()
     try:
         result = await loop.run(
-            query, max_steps=8, max_tokens=4000, on_step=_stream,
+            query, max_steps=8, max_tokens=4000, on_step=_stream, approve=approve,
         )
     except asyncio.CancelledError:
         console.print(f"   [{tokens.WARN}]agent cancelled[/]")
         raise
+    if result.status == "rejected":
+        console.print(f"   [{tokens.WARN}]plan rejected — no tools ran[/]")
+        return
     console.print(
         f"   [{tokens.DIM}]status={result.status} · steps={len(result.steps)} · "
         f"tokens={result.tokens['in']}/{result.tokens['out']} · "
@@ -1943,8 +2135,88 @@ async def _slash_agent(arg: str) -> None:
         console.print(f"   [{tokens.OK}]✓ {result.answer}[/]")
 
 
+async def _slash_cli_verb(verb: str, arg: str) -> None:
+    """Run a Wave D CLI verb (`/case`, `/rules`, `/playbook`, `/schedule`,
+    `/diff`, `/watch`, `/doctor`) from inside the chat shell.
+
+    These reuse the exact CLI handlers — we do NOT duplicate their logic.
+    Each handler synchronously calls ``asyncio.run`` internally, so we off-load
+    to a worker thread to avoid nesting event loops (same pattern as /settings).
+    Calling with no args prints the handler's own usage (returns 0/2).
+    """
+    import shlex
+
+    argv = shlex.split(arg) if arg else []
+
+    # `/schedule install` writes + enables a persistent OS job. The CLI already
+    # previews by default and requires --apply; mirror that gate here, and add
+    # an explicit inline confirmation before we ever pass --apply through.
+    if verb == "schedule" and argv and argv[0] == "install":
+        wants_apply = ("--apply" in argv) or ("--confirm" in argv)
+        if wants_apply:
+            try:
+                ok = await questionary.confirm(
+                    "schedule install will write + ENABLE a persistent OS job. "
+                    "Proceed?",
+                    default=False, style=QSTYLE,
+                ).ask_async()
+            except Exception:
+                ok = False
+            if not ok:
+                console.print(
+                    f"   [{tokens.WARN}]cancelled[/] — re-running as a preview "
+                    f"[{tokens.DIM}](nothing will be written)[/]",
+                )
+                argv = [a for a in argv if a not in ("--apply", "--confirm")]
+
+    # Lazy import the handler so a missing optional dep degrades to a message.
+    def _resolve():
+        if verb == "case":
+            from cli import _handle_case_subcommand as h
+            return h
+        if verb == "diff":
+            from cli import _handle_diff_subcommand as h
+            return h
+        if verb == "watch":
+            from cli import _handle_watch_subcommand as h
+            return h
+        if verb == "rules":
+            from app.features.correlation import cmd_rules as h
+            return h
+        if verb == "playbook":
+            from app.features.playbooks import cmd_playbook as h
+            return h
+        if verb == "schedule":
+            from app.features.scheduler import cmd_schedule as h
+            return h
+        if verb == "doctor":
+            from app.features.doctor import cmd_doctor as h
+            return h
+        return None
+
+    try:
+        handler = await asyncio.to_thread(_resolve)
+    except Exception as e:
+        console.print(f"   [{tokens.BAD}]/{verb} unavailable:[/] {type(e).__name__}: {e}")
+        return
+    if handler is None:
+        console.print(f"   [{tokens.BAD}]unknown verb {verb!r}[/]")
+        return
+    try:
+        await asyncio.to_thread(handler, argv)
+    except SystemExit:
+        pass  # some handlers sys.exit on bad args — keep the prompt alive
+    except Exception as e:
+        console.print(f"   [{tokens.BAD}]/{verb} error:[/] {type(e).__name__}: {e}")
+
+
 async def _slash_export(db: Database, arg: str) -> None:
-    """`/export <html|md|json|jsonl> [PATH]` — re-render the last scan."""
+    """`/export <csv|json|jsonl|md|html> [PATH]` — re-render the last scan.
+
+    Uses the SAME ``export_hits`` helper as the menu export, so both paths
+    serialise identically (model_dump, not pydantic __dict__) and default to
+    ``exports_dir`` rather than the cwd. An explicit PATH still wins.
+    """
     a = (arg or "html").strip().split()
     fmt = (a[0] if a else "html").lower()
     out = a[1] if len(a) > 1 else None
@@ -1953,32 +2225,22 @@ async def _slash_export(db: Database, arg: str) -> None:
     if q is None or hits is None:
         console.print(f"   [{tokens.WARN}]no scan to export yet — run one first[/]")
         return
-    import json as _json
-    from datetime import datetime
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    if fmt == "html":
-        from app.ui.html_report import render as render_html
-        path = out or f"./osint-{q.kind.value}-{ts}.html"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(render_html(q, hits, _CHAT_STATE.get("last_elapsed_ms", 0)))
-        console.print(f"   [{tokens.OK}]✓ html →[/] [{tokens.ACCENT}]{path}[/]")
-    elif fmt == "md":
-        from app.ui.md_report import render as render_md
-        path = out or f"./osint-{q.kind.value}-{ts}.md"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(render_md(q, hits, _CHAT_STATE.get("last_elapsed_ms", 0)))
-        console.print(f"   [{tokens.OK}]✓ md →[/] [{tokens.ACCENT}]{path}[/]")
-    elif fmt in ("json", "jsonl"):
-        path = out or f"./osint-{q.kind.value}-{ts}.{fmt}"
-        with open(path, "w", encoding="utf-8") as f:
-            if fmt == "json":
-                _json.dump([h.to_dict() if hasattr(h, "to_dict") else h.__dict__ for h in hits], f, default=str, indent=2)
-            else:
-                for h in hits:
-                    f.write(_json.dumps(h.to_dict() if hasattr(h, "to_dict") else h.__dict__, default=str) + "\n")
-        console.print(f"   [{tokens.OK}]✓ {fmt} →[/] [{tokens.ACCENT}]{path}[/]")
-    else:
-        console.print(f"   [{tokens.BAD}]unknown format {fmt!r}[/] — use html | md | json | jsonl")
+    try:
+        path = export_hits(
+            q, list(hits), fmt,
+            elapsed_ms=int(_CHAT_STATE.get("last_elapsed_ms", 0) or 0),
+            path=out,
+        )
+    except ValueError:
+        console.print(
+            f"   [{tokens.BAD}]unknown format {fmt!r}[/] — use "
+            + " | ".join(EXPORT_FORMATS),
+        )
+        return
+    except Exception as e:
+        console.print(f"   [{tokens.BAD}]export failed:[/] {type(e).__name__}: {e}")
+        return
+    console.print(f"   [{tokens.OK}]✓ {fmt} →[/] [{tokens.ACCENT}]{path}[/]")
 
 
 async def _action_theme_picker() -> None:

@@ -47,6 +47,8 @@ SlashName = Literal[
     "pattern",
     # Wave B — ReAct agent loop (opt-in)
     "agent",
+    # Wave D — first-class chat-shell verbs (parity with the CLI subcommands)
+    "case", "rules", "playbook", "schedule", "diff", "watch", "doctor",
 ]
 
 # Canonical name → aliases (the canonical is always first). Used by the
@@ -70,6 +72,14 @@ SLASH_ALIASES: dict[SlashName, tuple[str, ...]] = {
     "export":   ("/export",),
     "pattern":  ("/pattern", "/patterns"),
     "agent":    ("/agent",),
+    # Wave D — investigation verbs. Aliases kept short + collision-free.
+    "case":     ("/case", "/cases"),
+    "rules":    ("/rules", "/rule"),
+    "playbook": ("/playbook", "/pb"),
+    "schedule": ("/schedule", "/sched"),
+    "diff":     ("/diff",),
+    "watch":    ("/watch",),
+    "doctor":   ("/doctor", "/diag"),
 }
 
 # Flat list of every recognised slash spelling (sorted for stable completion).
@@ -98,6 +108,14 @@ SLASH_DESCRIPTIONS: dict[SlashName, str] = {
     "export":   "export the last scan: /export <html|md|json|jsonl>",
     "pattern":  "pick or list AI explain patterns: /pattern [name|list]",
     "agent":    "run the local ReAct agent loop: /agent <target>",
+    # Wave D
+    "case":     "named investigations: /case <new|list|show|note|resume|...>",
+    "rules":    "correlation rules: /rules <list|run> [--case SLUG]",
+    "playbook": "conditional DAG playbooks: /playbook <list|run> ...",
+    "schedule": "opt-in OS scheduler: /schedule <install|list|remove>",
+    "diff":     "diff two stored scans: /diff <kind> <value> [--from ID --to ID]",
+    "watch":    "watchlist daemon: /watch <add|list|remove|run> ...",
+    "doctor":   "local diagnostic: system · AI providers · network",
 }
 
 KIND_VALUES: tuple[str, ...] = tuple(k.value for k in QueryKind)

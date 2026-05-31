@@ -20,7 +20,6 @@ import argparse
 import asyncio
 import csv
 import io
-import ipaddress
 import json
 import os
 import re
@@ -35,62 +34,27 @@ if str(_HERE) not in sys.path:
 
 from app.core.config import load_settings
 from app.core.http import close_client
+
+# Query-kind inference lives in ONE canonical place (app.core.infer). We
+# re-export it here so `cli.infer_kind` stays importable for back-compat —
+# but the routing logic (wallet vs hash vs username, IPv6 ordering, …) is
+# never forked. See app/core/infer.py for the ordering rationale.
+from app.core.infer import infer_kind as _canonical_infer_kind
 from app.core.runner import runner
 from app.core.types import Hit, HitStatus, Query, QueryKind
 from app.ui import tokens
 from app.ui.banner import BRAND
 from app.ui.banner import render as render_banner
 
-_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
-_PHONE_RE = re.compile(r"^\+?[0-9 ()\-]{6,}$")
-_USERNAME_RE = re.compile(r"^[A-Za-z0-9_\-]{2,}$")
-_DOMAIN_RE = re.compile(
-    r"^[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?"
-    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)+$"
-)
-# md5 = 32, sha1 = 40, sha256 = 64, sha512 = 128. Must be all hex.
-_HASH_RE = re.compile(r"^[a-fA-F0-9]+$")
-# Wave C — wallet / image surface
-_BTC_BASE58_RE = re.compile(r"^[13][1-9A-HJ-NP-Za-km-z]{25,34}$")
-_BTC_BECH32_RE = re.compile(r"^bc1[0-9ac-hj-np-z]{6,87}$", re.IGNORECASE)
-_ETH_ADDR_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
-_IMG_URL_RE = re.compile(r"^https?://\S+\.(?:jpg|jpeg|png|webp|heic|tiff?)(?:\?.*)?$",
-                         re.IGNORECASE)
-_IMG_EXTS_CLI = (".jpg", ".jpeg", ".png", ".webp", ".heic", ".tif", ".tiff")
-
 
 def infer_kind(value: str) -> QueryKind:
-    v = value.strip()
-    # IPv4 / IPv6 — must be checked BEFORE the domain regex, otherwise an IPv6
-    # address falls through to USERNAME (1000-site probe blast) and IPv4 only
-    # reaches the IP module by accident via _DOMAIN_RE.
-    try:
-        ipaddress.ip_address(v.split("/", 1)[0])
-        return QueryKind.IP
-    except ValueError:
-        pass
-    if _EMAIL_RE.match(v):
-        return QueryKind.EMAIL
-    # Wave C — wallet / image: anchored regexes so we don't blast USERNAME probes
-    # at a 0x… ETH address. ETH check first (cheapest); hash check stays AFTER
-    # so a hex 40-char string remains a hash unless prefixed with "0x".
-    if _ETH_ADDR_RE.match(v) or _BTC_BECH32_RE.match(v) or _BTC_BASE58_RE.match(v):
-        return QueryKind.WALLET
-    if _IMG_URL_RE.match(v) or (
-        v.lower().endswith(_IMG_EXTS_CLI) and (os.path.isabs(v) or re.match(r"^[A-Za-z]:[\\/]", v))
-    ):
-        return QueryKind.IMAGE
-    # Hash detection — before phone (a 32-digit hex could look like digits).
-    if _HASH_RE.match(v) and len(v) in (32, 40, 64, 128):
-        return QueryKind.HASH
-    digits = re.sub(r"\D", "", v)
-    if _PHONE_RE.match(v) and 6 <= len(digits) <= 16:
-        return QueryKind.PHONE
-    if v.startswith("@"):
-        return QueryKind.USERNAME
-    if "." in v and _DOMAIN_RE.match(v):
-        return QueryKind.DOMAIN
-    return QueryKind.USERNAME
+    """Re-export of :func:`app.core.infer.infer_kind`, pinned non-None.
+
+    The canonical inferer returns ``None`` only for empty/whitespace input;
+    `cli.infer_kind`'s historical contract never returns None, so we fall back
+    to ``USERNAME`` for the empty case to preserve callers that don't guard it.
+    """
+    return _canonical_infer_kind(value) or QueryKind.USERNAME
 
 
 # ---- ANSI colour ------------------------------------------------------------
@@ -335,6 +299,69 @@ def _hit_to_jsonl(h: Hit, q: Query) -> str:
     return json.dumps(payload, default=str, ensure_ascii=False)
 
 
+async def _attach_to_case(db, result, slug: str, profile: str, st: Style) -> int | None:
+    """Attach a finished scan to a named case via the canonical cases API.
+
+    Delegates to ``cases.Case.attach_run`` (the single source of truth for
+    case_runs / case_entities writes) instead of re-implementing the INSERTs
+    in raw SQL. ``attach_run`` performs its own save+correlate, so callers
+    must NOT have saved this result already (we'd double-write the queries
+    row). Returns the underlying ``query_id`` (for downstream --pivot), or
+    ``None`` if the case doesn't exist.
+    """
+    from app.features import cases as _cases
+    c = await _cases.get(db, slug)
+    if c is None:
+        print(st.bad(f"  --case {slug!r} not found "
+                     f"(use `osint case new {slug}`)"),
+              file=sys.stderr)
+        return None
+    run_id = await c.attach_run(db, result, profile=(profile or ""))
+    # attach_run returns the case_runs.id; resolve the query_id for --pivot.
+    qid: int | None = None
+    if db._conn is not None:
+        async with db._conn.execute(
+            "SELECT query_id FROM case_runs WHERE id = ?", (run_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            if row is not None:
+                qid = int(row["query_id"])
+    n_ents = 0
+    if qid is not None and db._conn is not None:
+        async with db._conn.execute(
+            "SELECT COUNT(*) AS n FROM case_entities WHERE case_id = ?", (c.id,),
+        ) as cur:
+            n_ents = int((await cur.fetchone())["n"])
+    print(st.dim(f"  case[{slug}]: attached run #{run_id} ({n_ents} entities)"),
+          file=sys.stderr)
+    return qid
+
+
+async def _run_post_actions(db, qid: int | None, q: Query,
+                            args: argparse.Namespace, st: Style) -> None:
+    """Post-scan side effects: --pivot (bounded BFS re-scans) then --explain."""
+    pivot_depth = getattr(args, "pivot", 0) or 0
+    if pivot_depth > 0 and qid is not None:
+        from app.features.pivot import auto_pivot
+        print(st.dim(f"  ↪ auto-pivot starting (depth={pivot_depth})…"),
+              file=sys.stderr)
+        pivots = await auto_pivot(
+            qid, db, depth=pivot_depth,
+            on_progress=lambda msg: print(st.dim(msg), file=sys.stderr),
+        )
+        if pivots:
+            total_found = sum(r.found for _, r in pivots)
+            print(st.dim(f"  ↪ {len(pivots)} pivot scans · "
+                         f"{total_found} additional positives"),
+                  file=sys.stderr)
+    if getattr(args, "explain", False):
+        try:
+            from app.features.ai import _explain
+            await _explain(q.kind.value, q.value)
+        except Exception as ex:
+            print(st.bad(f"  ai explain failed: {ex}"), file=sys.stderr)
+
+
 async def _stream_run(q: Query, args: argparse.Namespace, st: Style, sink) -> int:
     r = runner()
     hits: list[Hit] = []
@@ -460,90 +487,21 @@ async def _stream_run(q: Query, args: argparse.Namespace, st: Style, sink) -> in
             db = Database(_s().db_path)
             await db.connect()
             try:
-                qid = await db.save_result(result)
-                ent_n, edge_n = await db.correlate_query(qid)
-                if ent_n or edge_n:
-                    print(st.dim(f"  graph: +{ent_n} entities · +{edge_n} edges "
-                                 f"→ `osint graph show {q.kind.value} {q.value}`"),
-                          file=sys.stderr)
-                # Wave D: --case SLUG attaches this scan to a named case.
                 case_slug = getattr(args, "case", None)
+                profile = getattr(args, "profile", None) or ""
                 if case_slug:
-                    from app.features import cases as _cases
-                    c = await _cases.get(db, case_slug)
-                    if c is None:
-                        print(st.bad(f"  --case {case_slug!r} not found "
-                                     f"(use `osint case new {case_slug}`)"),
+                    # The case path owns persistence: cases.attach_run does its
+                    # own save_result + correlate_query, so we must NOT save
+                    # standalone first (that would write a duplicate queries row).
+                    qid = await _attach_to_case(db, result, case_slug, profile, st)
+                else:
+                    qid = await db.save_result(result)
+                    ent_n, edge_n = await db.correlate_query(qid)
+                    if ent_n or edge_n:
+                        print(st.dim(f"  graph: +{ent_n} entities · +{edge_n} edges "
+                                     f"→ `osint graph show {q.kind.value} {q.value}`"),
                               file=sys.stderr)
-                    else:
-                        # Avoid double-save: we already saved above. Insert
-                        # the case_runs row + case_entities directly.
-                        assert db._conn is not None
-                        from datetime import UTC as _UTC
-                        from datetime import datetime as _dt
-                        started_iso = (
-                            result.query.started_at.isoformat()
-                            if result.query.started_at
-                            else _dt.now(_UTC).isoformat()
-                        )
-                        finished_iso = (
-                            result.finished_at.isoformat()
-                            if result.finished_at else None
-                        )
-                        await db._conn.execute(
-                            """INSERT INTO case_runs
-                               (case_id, query_id, started_at, finished_at,
-                                profile, agent_used)
-                               VALUES (?, ?, ?, ?, ?, 0)""",
-                            (c.id, qid, started_iso, finished_iso,
-                             (getattr(args, "profile", None) or "")),
-                        )
-                        async with db._conn.execute(
-                            """SELECT DISTINCT e.id FROM entities e
-                               JOIN edges ed ON ed.dst_id = e.id OR ed.src_id = e.id
-                               WHERE ed.hit_id IN
-                                 (SELECT id FROM hits WHERE query_id = ?)""",
-                            (qid,),
-                        ) as cur:
-                            ent_ids = [r["id"] for r in await cur.fetchall()]
-                        if ent_ids:
-                            now_iso = _dt.now(_UTC).isoformat()
-                            await db._conn.executemany(
-                                """INSERT OR IGNORE INTO case_entities
-                                   (case_id, entity_id, first_seen)
-                                   VALUES (?, ?, ?)""",
-                                [(c.id, eid, now_iso) for eid in ent_ids],
-                            )
-                        await db._conn.execute(
-                            "UPDATE cases SET updated_at = ? WHERE id = ?",
-                            (_dt.now(_UTC).isoformat(), c.id),
-                        )
-                        await db._conn.commit()
-                        print(st.dim(f"  case[{case_slug}]: attached run "
-                                     f"(+{len(ent_ids)} entities)"),
-                              file=sys.stderr)
-                # v4.0 auto-pivot — runs AFTER stream drain (no nested-callback deadlock)
-                pivot_depth = getattr(args, "pivot", 0) or 0
-                if pivot_depth > 0:
-                    from app.features.pivot import auto_pivot
-                    print(st.dim(f"  ↪ auto-pivot starting (depth={pivot_depth})…"),
-                          file=sys.stderr)
-                    pivots = await auto_pivot(
-                        qid, db, depth=pivot_depth,
-                        on_progress=lambda msg: print(st.dim(msg), file=sys.stderr),
-                    )
-                    if pivots:
-                        total_found = sum(r.found for _, r in pivots)
-                        print(st.dim(f"  ↪ {len(pivots)} pivot scans · "
-                                     f"{total_found} additional positives"),
-                              file=sys.stderr)
-                # v4.0: --explain → call Claude after scan completes
-                if getattr(args, "explain", False):
-                    try:
-                        from app.features.ai import _explain
-                        await _explain(q.kind.value, q.value)
-                    except Exception as ex:
-                        print(st.bad(f"  ai explain failed: {ex}"), file=sys.stderr)
+                await _run_post_actions(db, qid, q, args, st)
             finally:
                 await db.close()
         except Exception as e:
@@ -654,6 +612,24 @@ def _no_color_requested(args: argparse.Namespace) -> bool:
     return False
 
 
+def _color_disabled_from_argv(raw: list[str]) -> bool:
+    """Decide colour *before* the parser exists.
+
+    argparse 3.14 colourises and prints --help/usage during ``parse_args``,
+    which is BEFORE we ever construct a Style or call ``_no_color_requested``.
+    So `osint --no-color --help` would still emit ANSI. We reuse the same
+    three signals here (explicit flag · non-TTY · NO_COLOR env) so piped or
+    --no-color help is clean.
+    """
+    if "--no-color" in raw:
+        return True
+    if not sys.stdout.isatty():
+        return True
+    if os.getenv("NO_COLOR"):
+        return True
+    return False
+
+
 class _Formatter(argparse.RawDescriptionHelpFormatter):
     """Slightly wider help with raw description."""
 
@@ -680,21 +656,30 @@ subcommands (run any of these in place of <value>):
   preset list|show|run <name>           YAML-defined saved scans
   plugin list|install|search|remove     third-party plugin loader
   ai explain|query                       Claude-powered analysis (needs ANTHROPIC_API_KEY)
+  agent <target> [--no-approve]         local ReAct agent loop (opt-in; prompts to approve)
+  doctor            local diagnostic — system · AI providers · network
   case new|list|show|note|close|reopen|resume|rm        named investigations (Wave D)
   rules list|run [--case SLUG]          correlation rules engine (Wave D)
-  playbook list|run <id> <target>       conditional DAG playbooks (Wave D)
+  playbook list|run <id> <target> [--case SLUG]         conditional DAG playbooks (Wave D)
   schedule install|list|remove          opt-in OS scheduler (launchd/systemd/Task Sched.)
 """
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser(*, color: bool = True) -> argparse.ArgumentParser:
     examples = __doc__.split("Examples:", 1)[1] if __doc__ and "Examples:" in __doc__ else ""
-    ap = argparse.ArgumentParser(
-        prog="osint",
-        description=f"mytools-osint — personal OSINT lookups by {BRAND} (free APIs, no paid keys)",
-        formatter_class=_Formatter,
-        epilog=_SUBCOMMANDS_BLURB + (examples or ""),
-    )
+    kw: dict = {
+        "prog": "osint",
+        "description": f"mytools-osint — personal OSINT lookups by {BRAND} (free APIs, no paid keys)",
+        "formatter_class": _Formatter,
+        "epilog": _SUBCOMMANDS_BLURB + (examples or ""),
+    }
+    # argparse 3.14+ colourises help/usage; honour --no-color / NO_COLOR / pipe.
+    try:
+        ap = argparse.ArgumentParser(color=color, **kw)
+    except TypeError:
+        # Pre-3.14 argparse has no `color` kwarg — NO_COLOR env (set by the
+        # caller) is the only lever, which older argparse simply ignores.
+        ap = argparse.ArgumentParser(**kw)
     ap.add_argument("value", nargs="?", help="username, email, +phone, @tg, domain or IP")
     ap.add_argument("--kind", choices=[k.value for k in QueryKind], default=None,
                     help="force the query kind (auto-detect otherwise)")
@@ -1012,7 +997,12 @@ def _handle_case_subcommand(argv: list[str]) -> int:
                     status_filter = "open"
                 rows = await cases_mod.list_cases(db, status=status_filter)
                 if not rows:
-                    print("  (no cases)")
+                    if status_filter == "open":
+                        print("  no cases yet — create one with "
+                              "`osint case new <slug> --target <value> --kind <k>`")
+                    else:
+                        print(f"  no {status_filter} cases "
+                              "(try `osint case list --all`)")
                     return 0
                 try:
                     from rich.console import Console
@@ -1261,6 +1251,12 @@ def main(argv: list[str] | None = None) -> int:
     from app import __version__ as _ver
     _clear_splash(_splash)
     raw = list(sys.argv[1:] if argv is None else argv)
+    # Colour decision must happen BEFORE the parser runs — argparse 3.14
+    # colourises --help/usage during parse_args. Setting NO_COLOR makes both
+    # argparse's own help and our Style honour --no-color / piped output.
+    _color = not _color_disabled_from_argv(raw)
+    if not _color:
+        os.environ["NO_COLOR"] = "1"
     # Universal sub-command --help / -h handling: print usage, return 0.
     # Each entry: command-name → one-line summary + multi-line help body.
     _SUB_HELP: dict[str, tuple[str, str]] = {
@@ -1334,7 +1330,9 @@ def main(argv: list[str] | None = None) -> int:
             "usage: osint playbook <list|run> <id> <target> [--case SLUG]"),
         "schedule": ("opt-in OS scheduler (launchd / systemd / Task Scheduler)",
             "usage: osint schedule <install|list|remove> ...\n"
-            "  install <slug-or-target> --every <Nh|cron> [--profile NAME] [--dry-run]\n"
+            "  install <slug-or-target> --every <Nh|cron> [--profile NAME] [--apply]\n"
+            "    previews by default (writes nothing); pass --apply to write +\n"
+            "    enable a real persistent OS job.\n"
             "  list / remove <name>"),
     }
     if raw and raw[0] in _SUB_HELP and len(raw) > 1 and raw[1] in ("-h", "--help"):
@@ -1428,7 +1426,7 @@ def main(argv: list[str] | None = None) -> int:
                 port = int(raw[1:][i + 1])
         return _serve(port=port)
 
-    ap = _build_parser()
+    ap = _build_parser(color=_color)
     args = ap.parse_args(argv)
     st = Style(enabled=not _no_color_requested(args))
 

@@ -242,11 +242,10 @@ def run_tui(query: Query, html_out: str | None = None) -> int:
             self._rebuild_hit_table()
 
         def action_search(self) -> None:
-            """v4.0: prompt for inline filter — fuzzy substring across all fields."""
-            # textual's screens push/pop modally; for now we use a simple
-            # asyncio prompt via the footer-level keybinding hint.
-            # Better: pop a modal Input. Stub for now: cycle through 3 demos
-            # to prove the wiring works. Real impl below.
+            """Pop the modal filter input; applied on Enter, cleared on Esc.
+
+            Fuzzy substring filter across all hit fields — see ``_SearchScreen``.
+            """
             self.push_screen(_SearchScreen(self))
 
         def action_clear_search(self) -> None:
