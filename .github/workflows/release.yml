@@ -56,7 +56,7 @@ jobs:
           cp dist/mytools-osint${{ matrix.ext }} out/mytools-osint-${{ matrix.target }}${{ matrix.ext }} 2>/dev/null || echo "GUI binary skipped (build soft-failed)"
           cd out && shasum -a 256 * > SHA256SUMS
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bin-${{ matrix.target }}
           path: out/*
@@ -134,7 +134,7 @@ jobs:
           wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
           ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir "mytools-osint-${VERSION}-x86_64.AppImage" || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-packages
           path: |
