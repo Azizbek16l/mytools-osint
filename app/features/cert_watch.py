@@ -19,10 +19,13 @@ import asyncio
 import base64
 import contextlib
 import json
+import logging
 import secrets
 import struct
 import sys
 from datetime import UTC, datetime
+
+log = logging.getLogger("osint.cert_watch")
 
 CERTSTREAM_WS = "wss://certstream.calidog.io"
 
@@ -103,7 +106,8 @@ async def _watch(pattern: str, max_events: int | None = None) -> int:
                     break
                 try:
                     msg = json.loads(payload)
-                except Exception:
+                except Exception as e:
+                    log.debug("skip undecodable CT frame: %s", e)
                     continue
                 if msg.get("message_type") != "certificate_update":
                     continue

@@ -14,6 +14,7 @@ Endpoint: https://web.archive.org/cdx/search/cdx
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from urllib.parse import quote, urlsplit
 
@@ -22,6 +23,7 @@ from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
 
 NAME = "wayback_urls"
+log = logging.getLogger("osint.wayback_urls")
 _MAX_URLS = 100            # cap CDX response — keep memory + UI sane (smaller = faster)
 _TIMEOUT = 12.0            # CDX is slow on busy targets — bail fast not on top of httpx retry
 _SAMPLE_PER_KIND = 5       # rows to surface as individual hits per "interesting" path kind
@@ -92,7 +94,8 @@ async def _run(query: Query) -> AsyncIterator[Hit]:
             netloc = urlsplit(u).netloc.lower().split(":")[0]
             if netloc and netloc != host and netloc.endswith("." + host):
                 sub_seen.add(netloc)
-        except Exception:
+        except Exception as e:
+            log.debug("skip unparseable archived URL %r: %s", u, e)
             continue
     for sub in sorted(sub_seen)[:25]:
         yield Hit(module=NAME, source="Wayback CDX", category="dns",

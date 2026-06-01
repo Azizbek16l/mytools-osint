@@ -567,12 +567,14 @@ class Database:
         out: list[dict] = []
         for i in range(0, len(entity_ids), 500):
             chunk = entity_ids[i:i + 500]
+            # `placeholders` is only "?,?,?…" (one bound marker per id); the
+            # ids themselves are bound via tuple(chunk), never interpolated.
             placeholders = ",".join("?" for _ in chunk)
             async with self._conn.execute(
                 f"""SELECT e.src_id, e.dst_id, e.rel, e.source, e.confidence,
                           t.type AS dst_type, t.value AS dst_value
                    FROM edges e JOIN entities t ON e.dst_id = t.id
-                   WHERE e.src_id IN ({placeholders})""",
+                   WHERE e.src_id IN ({placeholders})""",  # noqa: S608 — only ? placeholders interpolated, values bound
                 tuple(chunk),
             ) as cur:
                 rows = await cur.fetchall()

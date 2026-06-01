@@ -2,9 +2,17 @@
 
 Free public explorers — NO API keys required:
   - blockchain.info        — BTC balance, tx count, first/last seen
-  - api.blockchair.com     — BTC / ETH dashboards (balance, tx count, ages)
-  - bitcoinabuse.com       — scam-report aggregator (key optional; works anon for read)
-  - cryptoscamdb           — separate scam DB; checked via HEAD first (host may be dead)
+  - api.blockchair.com     — BTC dashboard (balance, tx count, ages)
+  - bitcoinabuse.com       — BTC scam-report aggregator (works anon for read)
+  - eth.blockscout.com     — ETH balance, tx count, contract/ENS, is_scam flag
+
+ETH note: Blockchair's free tier returns HTTP 200 with ``{"data": null,
+"context":{"code":430,...}}`` once an unauthenticated IP exceeds its quota
+(common on shared/laptop IPs). The old code read that as "address not seen on
+chain", so funded ETH addresses silently returned 0 findings. We now use
+Blockscout's public v2 API for ETH (no key, returns balance + tx-count via a
+separate /counters endpoint, plus a free ``is_scam`` flag) and keep Blockchair
+for BTC only.
 
 Each source emits its own Hit. Severity escalates with confirmed abuse-report
 count. A single summary Hit closes the run.
@@ -107,10 +115,17 @@ async def _blockchain_info(addr: str) -> Hit:
     )
 
 
-async def _blockchair(addr: str, chain: str) -> Hit:
-    """Blockchair dashboard. chain ∈ {bitcoin, ethereum}."""
+async def _blockchair(addr: str, chain: str = "bitcoin") -> Hit:
+    """Blockchair dashboard — BTC only.
+
+    ETH moved to Blockscout (see ``_blockscout_eth``) because Blockchair's free
+    tier 430-rate-limits unauthenticated IPs while still returning HTTP 200 +
+    ``data: null`` — indistinguishable, at the HTTP layer, from a clean lookup.
+    We detect that ``context.code`` here and surface it as RATELIMITED rather
+    than silently reporting "not seen on chain".
+    """
     url = f"https://api.blockchair.com/{chain}/dashboards/address/{addr}"
-    sym = "BTC" if chain == "bitcoin" else "ETH"
+    sym = "BTC"
     try:
         client = await get_client()
         r = await client.get(url, timeout=_TIMEOUT,
@@ -129,19 +144,22 @@ async def _blockchair(addr: str, chain: str) -> Hit:
         return Hit(module=NAME, source=f"blockchair/{chain}", category="wallet",
                    url=url, status=HitStatus.ERROR,
                    title=addr, detail="unparseable JSON")
-    payload = (data.get("data") or {}).get(addr) or {}
+    # 200-with-error: free-tier quota exhaustion ("code":430) returns data:null.
+    ctx_code = (data.get("context") or {}).get("code")
+    if data.get("data") is None and ctx_code and int(ctx_code) >= 400:
+        return Hit(module=NAME, source=f"blockchair/{chain}", category="wallet",
+                   url=url, status=HitStatus.RATELIMITED, title=addr,
+                   detail=f"blockchair quota (code {ctx_code}) — set an API key to enable")
+    # Blockchair lowercases neither BTC (case-sensitive) addrs nor the data key;
+    # match the address case-insensitively to be safe.
+    bucket = data.get("data") or {}
+    payload = bucket.get(addr) or bucket.get(addr.lower()) or {}
     info = payload.get("address") or {}
     if not info:
         return Hit(module=NAME, source=f"blockchair/{chain}", category="wallet",
                    url=url, status=HitStatus.NO_DATA,
                    title=addr, detail="address not seen on chain")
-    if chain == "bitcoin":
-        bal = _btc_amount(info.get("balance"))
-    else:
-        try:
-            bal = float(info.get("balance", 0)) / 1e18
-        except Exception:
-            bal = 0.0
+    bal = _btc_amount(info.get("balance"))
     n_tx = int(info.get("transaction_count") or 0)
     first_seen = (info.get("first_seen_receiving") or "").split("T", 1)[0]
     last_seen = (info.get("last_seen_spending") or info.get("last_seen_receiving") or "").split("T", 1)[0]
@@ -157,6 +175,91 @@ async def _blockchair(addr: str, chain: str) -> Hit:
         severity=Severity.MEDIUM if bal > 0 else Severity.INFO,
         confidence=1.0 if bal > 0 else 0.85,
         evidence={"chain": chain, "balance": f"{bal:.8f}", "n_tx": str(n_tx)},
+    )
+
+
+async def _blockscout_eth(addr: str) -> Hit:
+    """ETH balance + activity via Blockscout's public v2 API (free, no key).
+
+    Two calls: the address record (``coin_balance`` in wei, ``is_scam``,
+    ``is_contract``, ``ens_domain_name``) plus a ``/counters`` call for the
+    transaction count. Blockscout returns HTTP 200 even for never-used
+    addresses (balance "0", tx_count "0") — we map that to NO_DATA. A genuine
+    404 (and 5xx/timeout) is classified the usual way.
+    """
+    base = "https://eth.blockscout.com/api/v2/addresses"
+    url = f"{base}/{addr}"
+    explorer = f"https://eth.blockscout.com/address/{addr}"
+    try:
+        client = await get_client()
+        r = await client.get(url, timeout=_TIMEOUT,
+                             headers={"Accept": "application/json"})
+    except Exception as e:
+        return Hit(module=NAME, source="blockscout/ethereum", category="wallet",
+                   url=explorer, status=classify_exception(e),
+                   title=addr, detail=f"{type(e).__name__}: {e}")
+    if r.status_code != 200:
+        # 404 = address not indexed (no activity) → NO_DATA via classify_http.
+        return Hit(module=NAME, source="blockscout/ethereum", category="wallet",
+                   url=explorer, status=classify_http(r.status_code),
+                   title=addr, detail=f"HTTP {r.status_code}")
+    try:
+        data = r.json() or {}
+    except Exception:
+        return Hit(module=NAME, source="blockscout/ethereum", category="wallet",
+                   url=explorer, status=HitStatus.ERROR,
+                   title=addr, detail="unparseable JSON")
+    try:
+        bal_eth = int(data.get("coin_balance") or 0) / 1e18
+    except (TypeError, ValueError):
+        bal_eth = 0.0
+
+    # Transaction count lives on a separate counters endpoint.
+    n_tx = 0
+    try:
+        rc = await client.get(f"{base}/{addr}/counters", timeout=_TIMEOUT,
+                              headers={"Accept": "application/json"})
+        if rc.status_code == 200:
+            n_tx = int((rc.json() or {}).get("transactions_count") or 0)
+    except Exception:
+        n_tx = 0
+
+    is_contract = bool(data.get("is_contract"))
+    is_scam = bool(data.get("is_scam"))
+    ens = data.get("ens_domain_name") or ""
+
+    # Never-used address: 200 but no balance and no transactions.
+    if bal_eth == 0 and n_tx == 0 and not is_contract:
+        return Hit(module=NAME, source="blockscout/ethereum", category="wallet",
+                   url=explorer, status=HitStatus.NO_DATA,
+                   title=addr, detail="address not seen on chain")
+
+    kind = "contract" if is_contract else "EOA"
+    detail = f"ETH balance={bal_eth:.8f} tx={n_tx} ({kind})"
+    if ens:
+        detail += f" ens={ens}"
+    if is_scam:
+        detail += " ⚠ flagged is_scam"
+    extra: dict[str, Any] = {
+        "balance_eth": bal_eth, "n_tx": n_tx,
+        "is_contract": is_contract, "is_scam": is_scam,
+    }
+    if ens:
+        extra["ens"] = ens
+    if is_scam:
+        sev = Severity.CRITICAL
+    elif bal_eth > 0:
+        sev = Severity.MEDIUM
+    else:
+        sev = Severity.INFO
+    evidence = {"chain": "ethereum", "balance": f"{bal_eth:.8f}",
+                "n_tx": str(n_tx), "is_scam": "true" if is_scam else "false"}
+    return Hit(
+        module=NAME, source="blockscout/ethereum", category="wallet",
+        url=explorer, status=HitStatus.FOUND, title=addr,
+        detail=detail, extra=extra, severity=sev,
+        confidence=1.0 if (bal_eth > 0 or n_tx > 0) else 0.85,
+        evidence=evidence,
     )
 
 
@@ -207,59 +310,6 @@ async def _bitcoinabuse(addr: str) -> Hit:
     )
 
 
-async def _cryptoscamdb(addr: str) -> Hit:
-    """CryptoScamDB. Host availability is verified via HEAD first; if the DB is
-    down we emit UNAVAILABLE (NOT ERROR — it's external)."""
-    base = "https://check.cryptoscamdb.org"
-    url = f"{base}/?search={addr}"
-    api = f"https://api.cryptoscamdb.org/v1/check/{addr}"
-    try:
-        client = await get_client()
-        # quick reachability probe
-        ping = await client.head(base, timeout=8.0, follow_redirects=True)
-        if ping.status_code >= 500:
-            return Hit(module=NAME, source="cryptoscamdb", category="wallet",
-                       url=url, status=HitStatus.UNAVAILABLE,
-                       title=addr, detail=f"site down (HEAD {ping.status_code})")
-    except Exception as e:
-        return Hit(module=NAME, source="cryptoscamdb", category="wallet",
-                   url=url, status=HitStatus.UNAVAILABLE,
-                   title=addr, detail=f"site unreachable: {type(e).__name__}")
-    try:
-        r = await client.get(api, timeout=_TIMEOUT,
-                             headers={"Accept": "application/json"})
-    except Exception as e:
-        return Hit(module=NAME, source="cryptoscamdb", category="wallet",
-                   url=url, status=classify_exception(e),
-                   title=addr, detail=f"{type(e).__name__}: {e}")
-    if r.status_code != 200:
-        return Hit(module=NAME, source="cryptoscamdb", category="wallet",
-                   url=url, status=classify_http(r.status_code),
-                   title=addr, detail=f"HTTP {r.status_code}")
-    try:
-        data = r.json() or {}
-    except Exception:
-        return Hit(module=NAME, source="cryptoscamdb", category="wallet",
-                   url=url, status=HitStatus.NO_DATA,
-                   title=addr, detail="unparseable JSON (treated as clean)")
-    success = data.get("success")
-    result = data.get("result") or data.get("entries") or []
-    if success is False or not result:
-        return Hit(module=NAME, source="cryptoscamdb", category="wallet",
-                   url=url, status=HitStatus.NO_DATA,
-                   title=addr, detail="no scam-DB entry")
-    n = len(result) if isinstance(result, list) else 1
-    return Hit(
-        module=NAME, source="cryptoscamdb", category="wallet",
-        url=url, status=HitStatus.FOUND, title=addr,
-        detail=f"{n} scam-DB entry/entries — likely scam wallet",
-        severity=Severity.CRITICAL,
-        confidence=0.95,
-        extra={"entries": n},
-        evidence={"entries": str(n)},
-    )
-
-
 # ---- main coroutine -------------------------------------------------------
 
 async def run(query: Query) -> AsyncIterator[Hit]:
@@ -283,23 +333,20 @@ async def run(query: Query) -> AsyncIterator[Hit]:
         if h.status == HitStatus.FOUND:
             found += 1
     else:
-        h = await _blockchair(addr, "ethereum")
+        # ETH: Blockscout carries balance + tx-count + a free is_scam flag.
+        h = await _blockscout_eth(addr)
         yield h
         if h.status == HitStatus.FOUND:
             found += 1
+            if h.extra.get("is_scam"):
+                n_scam += 1
 
-    # 2. abuse / scam DBs — only meaningful for BTC for now (the public DBs
-    #    we use don't index ETH addresses).
+    # 2. abuse DB — only BTC is indexed by the free public source we use.
     if chain == "btc":
         h = await _bitcoinabuse(addr)
         yield h
         if h.status == HitStatus.FOUND:
             n_abuse = int(h.extra.get("abuse_reports", 0) or 0)
-
-    h = await _cryptoscamdb(addr)
-    yield h
-    if h.status == HitStatus.FOUND:
-        n_scam = int(h.extra.get("entries", 0) or 0)
 
     # 3. summary
     if n_abuse + n_scam >= 5:

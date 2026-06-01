@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import random
 import re
 import time
@@ -15,6 +16,23 @@ import httpx
 from app.core.confidence import score_username_hit
 from app.core.http import get_client
 from app.core.types import Hit, HitStatus, Severity
+
+log = logging.getLogger("osint.modules.base")
+
+
+def _safe_search(pattern: str | None, text: str, flags: int = 0) -> bool:
+    """re.search that never raises on a malformed site pattern.
+
+    Several site signatures in data/sites.json ship broken regexes; a raw
+    re.search would raise re.error mid-probe and abort it. Returns False (no
+    match) for an empty or uncompilable pattern instead.
+    """
+    if not pattern:
+        return False
+    try:
+        return bool(re.search(pattern, text, flags))
+    except re.error:
+        return False
 
 
 def md5(s: str) -> str:
@@ -52,15 +70,31 @@ async def probe_site(
     """Run one site-signature check. Returns a Hit (positive, negative, or error)."""
     url_template: str = site["url"]
     valid_chars = site.get("valid_chars")
-    if valid_chars and not re.match(valid_chars, target):
-        return Hit(
-            module=module,
-            source=site["name"],
-            category=site.get("category", ""),
-            url=url_template.replace("{}", target),
-            status=HitStatus.SKIPPED,
-            detail="invalid username for site",
-        )
+    # A handful of site signatures ship malformed regexes (unbalanced parens,
+    # unterminated char-sets). re.match would raise re.error — an *Exception*,
+    # not a timeout — which used to propagate out and burn the probe as a bogus
+    # ERROR. Treat an unusable valid_chars as "no constraint" so the probe still
+    # runs (data-quality bug in the site list, not a reason to fail the probe).
+    if valid_chars:
+        try:
+            ok = re.match(valid_chars, target)
+        except re.error as e:
+            # Broken pattern in the site list (data-quality bug): don't gate on
+            # it and don't burn the probe as a bogus ERROR — but log it so a bad
+            # dataset entry is observable. A compile-time test on data/sites.json
+            # (test_sites_golden) guards against this slipping in unnoticed.
+            log.debug("site %r has an invalid valid_chars regex %r: %s",
+                      site.get("name"), valid_chars, e)
+            ok = True
+        if not ok:
+            return Hit(
+                module=module,
+                source=site["name"],
+                category=site.get("category", ""),
+                url=url_template.replace("{}", target),
+                status=HitStatus.SKIPPED,
+                detail="invalid username for site",
+            )
     # transforms (e.g. md5 of email for Gravatar)
     transform = site.get("transform")
     target_for_url = target
@@ -193,8 +227,8 @@ async def probe_site(
     elif check == "regex":
         good = site.get("good_regex")
         bad = site.get("bad_regex")
-        bm = bool(bad and re.search(bad, body_text, re.IGNORECASE | re.DOTALL))
-        gm = bool(good and re.search(good, body_text, re.IGNORECASE | re.DOTALL))
+        bm = _safe_search(bad, body_text, re.IGNORECASE | re.DOTALL)
+        gm = _safe_search(good, body_text, re.IGNORECASE | re.DOTALL)
         # Status-code-based decision dominates regex match: a 4xx without an
         # explicit good_status override is a strong NOT_FOUND signal even if
         # the body coincidentally matches a generic good_regex like `<title>`.
@@ -314,12 +348,23 @@ async def stream_probes(
     timeout: float | None = None,
     retries: int = 0,
     per_host: int = 4,
+    hard_timeout: float | None = None,
 ) -> AsyncIterator[Hit]:
     """Run all site probes concurrently, yielding Hits as they finish.
 
     Two gates: a global cap (`concurrency`) and a per-host cap (`per_host`).
     Without the per-host cap, bursting ~1000 probes fans dozens of parallel
     hits at sites sharing a WAF/CDN, tripping burst detection → 403/429 storms.
+
+    ``hard_timeout`` (opt-in; ``None`` = off, unchanged for existing callers) is
+    a wall-clock ceiling enforced per probe via :func:`asyncio.wait_for`. The
+    per-call httpx ``timeout`` bounds each network *phase* (connect/read/…), but
+    under a ~1000-way fan-out a probe can still spend tens of seconds queued in
+    the shared HTTP/2 pool / event loop and return a valid response far past
+    ``timeout`` — measured 30–42s probes on a full username scan. Those tail
+    probes serialise through the global gate and dominate total runtime. The
+    hard ceiling converts that unbounded tail into a bounded one; a probe that
+    blows it is surfaced as UNAVAILABLE (upstream-too-slow, not our bug).
     """
     sem = asyncio.Semaphore(concurrency)
     host_sems: dict[str, asyncio.Semaphore] = {}
@@ -338,7 +383,29 @@ async def stream_probes(
         await asyncio.sleep(random.uniform(0, 0.12))
         # Per-host gate first (queues same-host probes), then the global cap.
         async with _host_sem(site), sem:
-            return await probe_site(site, target, module, timeout=timeout, retries=retries)
+            coro = probe_site(site, target, module, timeout=timeout, retries=retries)
+            try:
+                if hard_timeout is not None:
+                    return await asyncio.wait_for(coro, timeout=hard_timeout)
+                return await coro
+            except TimeoutError:  # asyncio.TimeoutError is an alias on 3.11+
+                # Hard ceiling hit — the site is too slow under load to be worth
+                # waiting on. Not our bug, so UNAVAILABLE (keeps it out of the
+                # ERROR counter, same as a transport timeout in probe_site).
+                return Hit(
+                    module=module, source=site.get("name", "?"),
+                    category=site.get("category", ""),
+                    status=HitStatus.UNAVAILABLE,
+                    detail=f"hard timeout >{hard_timeout:g}s (slow under load)",
+                )
+            except Exception as e:
+                # A malformed site signature (e.g. bad regex) must not kill the
+                # whole fan-out — surface it as ERROR but keep the site name.
+                return Hit(
+                    module=module, source=site.get("name", "?"),
+                    category=site.get("category", ""),
+                    status=HitStatus.ERROR, detail=f"{type(e).__name__}: {e}",
+                )
 
     tasks = [asyncio.create_task(one(s)) for s in sites]
     for fut in asyncio.as_completed(tasks):

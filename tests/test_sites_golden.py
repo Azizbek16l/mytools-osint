@@ -40,3 +40,24 @@ def test_site_dataset_checksum() -> None:
         "data/sites.json content changed — a detection signature may have drifted. "
         f"If intentional, set EXPECTED_DIGEST = {digest!r}"
     )
+
+
+def test_every_valid_chars_regex_compiles() -> None:
+    """Data-quality gate: every site's `valid_chars` must be a compilable regex.
+
+    At runtime an unparseable pattern is tolerated (ignored + debug-logged) so a
+    single bad entry can't abort a 1000-site fan-out — but it should never ship.
+    This catches a malformed pattern at test time instead of silently weakening
+    a probe in production.
+    """
+    import re
+    bad = []
+    for s in _sites():
+        pat = s.get("valid_chars")
+        if not pat:
+            continue
+        try:
+            re.compile(pat)
+        except re.error as e:
+            bad.append(f"{s.get('name')!r}: {pat!r} ({e})")
+    assert not bad, "invalid valid_chars regex in data/sites.json:\n  " + "\n  ".join(bad)

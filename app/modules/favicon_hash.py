@@ -17,12 +17,15 @@ from __future__ import annotations
 
 import base64
 import ipaddress
+import logging
 import os
 from collections.abc import AsyncIterator
 
 from app.core.http import _opsec_on, get_client
 from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
+
+log = logging.getLogger("osint.favicon_hash")
 from app.modules.web_recon import _mmh3_x86_32
 
 NAME = "favicon_hash"
@@ -92,7 +95,8 @@ async def _run(query: Query) -> AsyncIterator[Hit]:
             # No cross-host redirects for favicons — narrows SSRF surface.
             r = await client.get(url, timeout=_TIMEOUT,
                                  follow_redirects=False)
-        except Exception:
+        except Exception as e:
+            log.debug("favicon fetch failed for %s: %s", url, e)
             continue
         if r.status_code != 200:
             continue

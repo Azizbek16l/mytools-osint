@@ -13,12 +13,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from collections.abc import AsyncIterator
 
 from app.core.http import get_client
 from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
+
+log = logging.getLogger("osint.waf_cms_graphql")
 
 # ============================================================================
 # WAF DETECT
@@ -183,7 +186,8 @@ async def _gql_run(query: Query) -> AsyncIterator[Hit]:
                 continue
             try:
                 data = r.json()
-            except Exception:
+            except Exception as e:
+                log.debug("GraphQL probe /%s returned non-JSON: %s", path, e)
                 continue
             if not isinstance(data, dict):
                 continue
@@ -209,7 +213,8 @@ async def _gql_run(query: Query) -> AsyncIterator[Hit]:
                           detail="GraphQL detected, introspection BLOCKED (good)",
                           severity=Severity.MEDIUM,
                           extra={"path": path, "introspection": False})
-        except Exception:
+        except Exception as e:
+            log.debug("GraphQL probe /%s failed: %s", path, e)
             continue
 
 
@@ -260,7 +265,8 @@ async def _smaps_run(query: Query) -> AsyncIterator[Hit]:
     for fut in asyncio.as_completed(tasks):
         try:
             h = await fut
-        except Exception:
+        except Exception as e:
+            log.debug("source-map probe task failed: %s", e)
             continue
         if h is None:
             continue

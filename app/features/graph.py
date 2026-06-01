@@ -279,7 +279,10 @@ def cmd_graph(argv: list[str]) -> int:
                     print(f"unknown format {fmt!r}; valid: gexf, graphml, cytoscape",
                           file=sys.stderr); return 2
                 if out:
-                    Path(out).write_text(payload, encoding="utf-8")
+                    # Offload the blocking file write so the event loop is not
+                    # stalled on disk I/O for large graph exports.
+                    await asyncio.to_thread(
+                        Path(out).write_text, payload, encoding="utf-8")
                     print(f"  wrote {len(payload):,} bytes → {out}")
                 else:
                     sys.stdout.write(payload + "\n")

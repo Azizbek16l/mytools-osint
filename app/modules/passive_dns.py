@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 import os
 from collections.abc import AsyncIterator
 
@@ -31,6 +32,7 @@ from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
 
 NAME = "passive_dns"
+log = logging.getLogger("osint.passive_dns")
 
 _TIMEOUT = 10.0
 _MAX_ROWS_PER_SOURCE = 60
@@ -170,7 +172,8 @@ async def _circl(value: str) -> AsyncIterator[Hit]:
         try:
             import json
             rows.append(json.loads(line))
-        except Exception:
+        except Exception as e:
+            log.debug("skip malformed CIRCL pDNS line: %s", e)
             continue
     if not rows:
         yield Hit(module=NAME, source="CIRCL pDNS", category="passive-dns",

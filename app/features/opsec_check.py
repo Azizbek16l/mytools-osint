@@ -14,10 +14,13 @@ while --opsec is active.
 from __future__ import annotations
 
 import asyncio
+import logging
 import statistics
 import time
 
 from app.core.http import _opsec_on, get_client
+
+log = logging.getLogger("osint.opsec_check")
 
 _IPCHECK_URLS = [
     "https://api.ipify.org?format=json",
@@ -40,12 +43,14 @@ async def _egress_ip() -> tuple[str | None, str]:
             if txt.startswith("{"):
                 try:
                     txt = r.json().get("ip", "")
-                except Exception:
+                except Exception as e:
+                    log.debug("egress IP provider %s returned non-JSON: %s", url, e)
                     continue
             txt = txt.strip().strip('"')
             if txt and "." in txt or ":" in txt:
                 return txt, url
-        except Exception:
+        except Exception as e:
+            log.debug("egress IP provider %s failed: %s", url, e)
             continue
     return None, ""
 

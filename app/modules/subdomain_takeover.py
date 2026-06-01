@@ -20,6 +20,7 @@ services (24 entries vs. their 50+).
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from collections.abc import AsyncIterator
 
@@ -28,6 +29,8 @@ import dns.asyncresolver
 from app.core.http import _opsec_on, get_client
 from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
+
+log = logging.getLogger("osint.subdomain_takeover")
 
 NAME = "subdomain_takeover"
 _TIMEOUT = 6.0
@@ -105,7 +108,8 @@ async def _probe(host: str) -> Hit | None:
                                  follow_redirects=True)
             body = (r.text or "")[:4096].lower()
             break
-        except Exception:
+        except Exception as e:
+            log.debug("%s fetch of %s failed: %s", scheme, host, e)
             continue
     if fingerprint.lower() in body:
         return Hit(
@@ -175,7 +179,8 @@ async def _run(query: Query) -> AsyncIterator[Hit]:
     for fut in asyncio.as_completed(tasks):
         try:
             hit = await fut
-        except Exception:
+        except Exception as e:
+            log.debug("subdomain takeover probe task failed: %s", e)
             continue
         if hit is None:
             continue

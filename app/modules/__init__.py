@@ -20,6 +20,7 @@ from . import email_security as _email_security
 from . import favicon_hash as _favicon_hash
 from . import github_leaks as _github_leaks
 from . import hackertarget as _hackertarget
+from . import hash_lookup as _hash_lookup
 from . import hibp_passwords as _hibp_passwords
 from . import http_headers as _http_headers
 from . import image as _image
@@ -65,6 +66,9 @@ MODULES = [
     _email_security, _typosquat, _pgp_keys, _tor_check,
     # cyber-pro v0.3 additions
     _github_leaks, _cloud_buckets, _hibp_passwords, _malware_bazaar,
+    # free, no-key hash reputation (works out of the box; complements
+    # the key-gated malware_bazaar for QueryKind.HASH)
+    _hash_lookup,
     _web_hardening, _well_known, _subdomain_brute, _passive_dns,
     # v4.1 active recon
     _route_discover, _subdomain_permute, _port_scan, _waf_cms_graphql,

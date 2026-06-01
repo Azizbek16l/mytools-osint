@@ -107,7 +107,8 @@ def cmd_plugin(argv: list[str]) -> int:
         try:
             r = subprocess.run([sys.executable, "-m", "pip", "search",
                                 f"mytools-osint-{q}"],
-                               capture_output=True, text=True, timeout=20)
+                               capture_output=True, text=True, timeout=20,
+                               check=False)
             print(r.stdout or r.stderr)
         except Exception:
             # pip search was deprecated on the official index. Fall back to
@@ -119,7 +120,8 @@ def cmd_plugin(argv: list[str]) -> int:
         pkg = argv[1]
         try:
             r = subprocess.run([sys.executable, "-m", "pip", "install", pkg],
-                               capture_output=True, text=True, timeout=180)
+                               capture_output=True, text=True, timeout=180,
+                               check=False)
             print(r.stdout)
             if r.returncode != 0:
                 print(r.stderr, file=sys.stderr)
@@ -133,7 +135,8 @@ def cmd_plugin(argv: list[str]) -> int:
         try:
             r = subprocess.run([sys.executable, "-m", "pip", "uninstall",
                                 "-y", pkg],
-                               capture_output=True, text=True, timeout=60)
+                               capture_output=True, text=True, timeout=60,
+                               check=False)
             print(r.stdout)
             return r.returncode
         except Exception as e:

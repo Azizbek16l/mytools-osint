@@ -87,10 +87,14 @@ async def _enrich_ip(ip: str) -> AsyncIterator[Hit]:
 
     if asn or prefix or holder:
         detail_bits = []
-        if asn:    detail_bits.append(f"AS{asn}")
-        if holder: detail_bits.append(holder)
-        if prefix: detail_bits.append(prefix)
-        if abuse_email: detail_bits.append(f"abuse={abuse_email}")
+        if asn:
+            detail_bits.append(f"AS{asn}")
+        if holder:
+            detail_bits.append(holder)
+        if prefix:
+            detail_bits.append(prefix)
+        if abuse_email:
+            detail_bits.append(f"abuse={abuse_email}")
         yield Hit(module=NAME, source="RIPEstat",
                   category="ip",
                   url=f"https://stat.ripe.net/{ip}",
