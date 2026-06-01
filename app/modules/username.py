@@ -40,6 +40,14 @@ _cached_sites: list[dict] | None = None
 # against sites sharing a WAF/CDN. We tune timeout/retry, not it.
 _USERNAME_HARD_TIMEOUT = 20.0   # absolute wall-clock ceiling per probe
 
+# The fan-out is ~1000 sites across ~917 DISTINCT hosts, so the per-host gate
+# (per_host=4) almost never binds — wall-clock is dominated by the GLOBAL cap.
+# The default http_concurrency (40) is tuned for the small per-kind module sets;
+# for this one huge fan-out we raise the cap so it drains faster. The HTTP pool
+# (max_connections >= 128) and the per-host gate both still hold, so this is
+# faster WITHOUT re-introducing 403/429 storms.
+_USERNAME_CONCURRENCY = 100
+
 
 def load_sites() -> list[dict]:
     global _cached_sites
@@ -60,7 +68,7 @@ async def run(query: Query) -> AsyncIterator[Hit]:
     sites = load_sites()
     async for h in stream_probes(
         sites, user, NAME,
-        concurrency=s.http_concurrency,
+        concurrency=max(s.http_concurrency, _USERNAME_CONCURRENCY),
         timeout=s.http_timeout_sec,
         # Username probes don't benefit from the retry: a timed-out/blocked site
         # almost never flips to a real hit on a second try, and the retry's
