@@ -83,6 +83,7 @@ packages = ["app"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "cli.py" = "cli.py"
+"cli_help.py" = "cli_help.py"
 "main.py" = "main.py"
 "data" = "data"
 "scripts/completions" = "scripts/completions"
@@ -91,6 +92,7 @@ packages = ["app"]
 include = [
     "app/",
     "cli.py",
+    "cli_help.py",
     "main.py",
     "data/",
     "scripts/",
