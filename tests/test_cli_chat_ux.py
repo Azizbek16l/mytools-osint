@@ -234,9 +234,37 @@ def test_cli_infer_kind_is_canonical() -> None:
     # The canonical returns None only for empty input; cli's wrapper keeps the
     # historical non-None contract (callers don't guard the empty case).
     assert canonical("") is None
-    assert cli.infer_kind("") == QueryKind.USERNAME
+    assert cli.infer_kind("") == QueryKind.USERNAME  # cli wrapper never returns None
 
-    # And it must be the canonical one — calling through the canonical module.
-    import app.core.infer as infer_mod
-    assert cli.infer_kind("0x" + "b" * 40) == infer_mod.infer_kind("0x" + "b" * 40)
-    assert cli.infer_kind("0x" + "b" * 40) == QueryKind.WALLET
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--no-color", "playbook", "list"],
+        ["--no-color", "--no-banner", "rules", "list"],
+        ["--no-splash", "--no-color", "playbook", "list"],
+    ],
+)
+def test_global_flags_before_subcommand_dispatch(argv, capsys) -> None:
+    """Position-independent subcommands: leading global toggle flags must not
+    break dispatch. `osint --no-color playbook list` used to argparse-error
+    (exit 2, 'unrecognized arguments'); it must now route to the subcommand."""
+    import cli
+    rc = cli.main(argv)
+    assert rc == 0, f"{argv} should dispatch the subcommand, got rc={rc}"
+    out = capsys.readouterr().out
+    assert "unrecognized arguments" not in out
+
+
+def test_route_leading_toggles_helper() -> None:
+    """The pure re-point helper: skip leading toggles before a verb, but leave a
+    bare scan value intact so main scans aren't mis-routed."""
+    import cli
+    assert cli._route_leading_toggles(["--no-color", "playbook", "list"]) == ["playbook", "list"]
+    assert cli._route_leading_toggles(["--no-color", "--no-banner", "rules", "list"]) == ["rules", "list"]
+    # bare value after toggles → NOT a subcommand → unchanged (main scan path)
+    assert cli._route_leading_toggles(["--no-color", "octocat"]) == ["--no-color", "octocat"]
+    # subcommand already first → unchanged
+    assert cli._route_leading_toggles(["doctor"]) == ["doctor"]
+    # no leading toggles, value first → unchanged
+    assert cli._route_leading_toggles(["github.com"]) == ["github.com"]

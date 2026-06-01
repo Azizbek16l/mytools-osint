@@ -664,6 +664,34 @@ subcommands (run any of these in place of <value>):
   schedule install|list|remove          opt-in OS scheduler (launchd/systemd/Task Sched.)
 """
 
+# No-arg global toggle flags that may legitimately precede a subcommand.
+_GLOBAL_TOGGLE_FLAGS = frozenset({
+    "--no-color", "--no-banner", "--no-splash", "--debug", "--opsec",
+    "--banner", "--classic", "--per-source", "--no-save",
+})
+# Every recognised subcommand verb (must match the dispatch chain in main()).
+_SUBCOMMAND_NAMES = frozenset({
+    "config", "mcp", "watch", "diff", "self-update", "selfupdate", "update",
+    "opsec-check", "opseccheck", "cert-watch", "certwatch", "cache", "graph",
+    "export", "preset", "plugin", "ai", "agent", "case", "rules", "playbook",
+    "schedule", "doctor", "serve",
+})
+
+
+def _route_leading_toggles(raw: list[str]) -> list[str]:
+    """Re-point argv past leading global toggles when a subcommand follows.
+
+    `osint --no-color playbook list` → `playbook list` (dispatchable). A bare
+    value (`osint --no-color octocat`) is left intact — octocat isn't a verb —
+    so the main scan path is unaffected. Pure function (unit-tested).
+    """
+    lead = 0
+    while lead < len(raw) and raw[lead] in _GLOBAL_TOGGLE_FLAGS:
+        lead += 1
+    if lead and lead < len(raw) and raw[lead] in _SUBCOMMAND_NAMES:
+        return raw[lead:]
+    return raw
+
 
 def _build_parser(*, color: bool = True) -> argparse.ArgumentParser:
     examples = __doc__.split("Examples:", 1)[1] if __doc__ and "Examples:" in __doc__ else ""
@@ -1257,6 +1285,15 @@ def main(argv: list[str] | None = None) -> int:
     _color = not _color_disabled_from_argv(raw)
     if not _color:
         os.environ["NO_COLOR"] = "1"
+
+    # Position-independent subcommands: a user may put global toggle flags
+    # BEFORE a subcommand (e.g. `osint --no-color playbook run X`). The dispatch
+    # below keys on raw[0], so re-point raw past leading toggles when a real
+    # subcommand follows. (Toggle effects are already applied globally above;
+    # subcommands honour NO_COLOR via the env. A main scan like
+    # `osint --no-color octocat` is untouched — octocat isn't a subcommand.)
+    raw = _route_leading_toggles(raw)
+
     # Universal sub-command --help / -h handling: print usage, return 0.
     # Each entry: command-name → one-line summary + multi-line help body.
     _SUB_HELP: dict[str, tuple[str, str]] = {
