@@ -105,7 +105,7 @@ async def run(query: Query) -> AsyncIterator[Hit]:
     candidates = [f"{w}.{domain}" for w in WORDLIST]
     sem = asyncio.Semaphore(40)
 
-    async def gated(h: str):
+    async def gated(h: str) -> tuple[str, list[str]]:
         async with sem:
             return await _resolve(h)
 

@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import AsyncIterator
+from typing import Any, cast
 from urllib.parse import quote
 
 from app.core.classify import classify_exception, classify_http
@@ -62,7 +63,7 @@ def _headers() -> dict[str, str]:
     return h
 
 
-async def _gh_get(url: str) -> tuple[int, dict | list | None, str]:
+async def _gh_get(url: str) -> tuple[int, dict[str, Any] | None, str]:
     try:
         client = await get_client()
         r = await client.get(url, headers=_headers(), timeout=_TIMEOUT)
@@ -138,14 +139,21 @@ async def _search_commits_for_email(email: str) -> AsyncIterator[Hit]:
                   title=email, detail=err)
         return
     total = data.get("total_count", 0)
-    items = data.get("items") or []
+    items: list[dict[str, Any]] = data.get("items") or []
     if total == 0:
         yield Hit(module=NAME, source="github commit-search", category="leak",
                   url=f"https://github.com/search?q=author-email%3A{email}&type=commits",
                   status=HitStatus.NO_DATA, title=email,
                   detail="no public commits by this email")
         return
-    repos = sorted({(i.get("repository") or {}).get("full_name") for i in items if i.get("repository")})
+    # `.get("full_name")` is typed Any|None via the empty-dict fallback; the set
+    # only ever holds present full_name strings in practice. Cast keeps runtime
+    # behaviour identical while giving `sorted` a sortable element type.
+    repo_names = cast(
+        "set[str]",
+        {(i.get("repository") or {}).get("full_name") for i in items if i.get("repository")},
+    )
+    repos = sorted(repo_names)
     yield Hit(
         module=NAME, source="github commit-search", category="leak",
         url=f"https://github.com/search?q=author-email%3A{email}&type=commits",
@@ -199,7 +207,7 @@ async def run(query: Query) -> AsyncIterator[Hit]:
         # Run code+commit+user searches concurrently and stream as they finish.
         # User-search runs against the user index; commit-search against commit
         # index; code-search against the code index — three distinct rate buckets.
-        async def collect(gen):
+        async def collect(gen: AsyncIterator[Hit]) -> list[Hit]:
             return [h async for h in gen]
 
         tasks = [

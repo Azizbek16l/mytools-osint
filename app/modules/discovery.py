@@ -185,7 +185,7 @@ async def _github_user(username: str) -> AsyncIterator[Hit]:
             yield Hit(
                 module=NAME, source="GitHub:user", category="profile",
                 status=HitStatus.FOUND,
-                title=data.get("name") or data.get("login"),
+                title=data.get("name") or data.get("login") or "",
                 detail=(
                     f"id={data.get('id')} repos={data.get('public_repos')} "
                     f"followers={data.get('followers')} "

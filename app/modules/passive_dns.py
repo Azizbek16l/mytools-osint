@@ -25,6 +25,7 @@ import ipaddress
 import logging
 import os
 from collections.abc import AsyncIterator
+from typing import Any
 
 from app.core.classify import classify_exception, classify_http
 from app.core.http import get_client
@@ -167,7 +168,7 @@ async def _circl(value: str) -> AsyncIterator[Hit]:
                   url=url, status=classify_http(r.status_code),
                   title=value, detail=f"HTTP {r.status_code}")
         return
-    rows: list = []
+    rows: list[dict[str, Any]] = []
     for line in (r.text or "").splitlines():
         try:
             import json
@@ -203,7 +204,7 @@ async def run(query: Query) -> AsyncIterator[Hit]:
     if not value:
         return
 
-    async def collect(gen):
+    async def collect(gen: AsyncIterator[Hit]) -> list[Hit]:
         return [h async for h in gen]
 
     tasks = [

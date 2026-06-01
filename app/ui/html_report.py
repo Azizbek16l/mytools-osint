@@ -18,8 +18,9 @@ import json
 import math
 from collections import defaultdict
 from datetime import UTC, datetime
+from typing import Any
 
-from app.core.types import HitStatus, Query, QueryResult  # noqa: I001
+from app.core.types import Hit, HitStatus, Query, QueryResult
 
 _SEV_COLOR = {
     "info":     ("#8fa1b3", "#1b2a36"),
@@ -83,8 +84,8 @@ _ENTITY_COLORS = {
 }
 
 
-def _render_interactive_graph(entities: list[dict] | None,
-                              edges: list[dict] | None) -> str:
+def _render_interactive_graph(entities: list[dict[str, Any]] | None,
+                              edges: list[dict[str, Any]] | None) -> str:
     """Vanilla-JS SVG force-directed graph. Zero deps, runs offline, drag/zoom.
 
     Algorithm: Verlet-style integration with repulsion (Coulomb-like) +
@@ -335,13 +336,13 @@ def _render_interactive_graph(entities: list[dict] | None,
 
 
 def render_report(query: Query, result: QueryResult, elapsed_ms: int,
-                  entities: list[dict] | None = None,
-                  edges: list[dict] | None = None) -> str:
+                  entities: list[dict[str, Any]] | None = None,
+                  edges: list[dict[str, Any]] | None = None) -> str:
     """Render report. If `entities`+`edges` are supplied, embed an interactive
     force-directed graph (zero deps, vanilla JS); otherwise fall back to the
     static SVG pivot diagram from v0.2.x."""
     hits = result.hits
-    by_module: dict[str, list] = defaultdict(list)
+    by_module: dict[str, list[Hit]] = defaultdict(list)
     for h in hits:
         by_module[h.module].append(h)
     n_total = len(hits)
@@ -349,7 +350,7 @@ def render_report(query: Query, result: QueryResult, elapsed_ms: int,
     n_crit = sum(1 for h in hits if h.severity.value == "critical")
     n_high = sum(1 for h in hits if h.severity.value == "high")
     n_med = sum(1 for h in hits if h.severity.value == "medium")
-    sev_counts = defaultdict(int)
+    sev_counts: defaultdict[str, int] = defaultdict(int)
     for h in hits:
         sev_counts[h.severity.value] += 1
 

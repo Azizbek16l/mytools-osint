@@ -26,7 +26,7 @@ import json
 import logging
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import mcp.types as mcp_types
 from mcp.server import Server
@@ -99,7 +99,7 @@ def _text(payload: Any) -> list[mcp_types.TextContent]:
 def _load_sites_payload() -> dict[str, Any]:
     """Return the contents of ``data/sites.json`` or an empty stub if missing."""
     try:
-        return json.loads(_SITES_PATH.read_text(encoding="utf-8"))
+        return cast("dict[str, Any]", json.loads(_SITES_PATH.read_text(encoding="utf-8")))
     except FileNotFoundError:
         return {"schema": 1, "sites": []}
     except Exception as e:
@@ -238,7 +238,7 @@ async def _handle_call_tool(
         from app.ui import tokens
 
         mods = runner().all_modules()
-        payload = [
+        modules_payload = [
             {
                 "name": m.name,
                 "kinds": sorted(k.value for k in m.kinds),
@@ -247,7 +247,7 @@ async def _handle_call_tool(
             }
             for m in mods
         ]
-        return _text(payload)
+        return _text(modules_payload)
 
     if name == "list_sites_stats":
         try:
@@ -427,7 +427,7 @@ async def _get_prompt(name: str, arguments: dict[str, str] | None) -> mcp_types.
     else:
         # Missing arguments render as <missing:name> so the agent sees a clear gap
         # rather than a Python KeyError.
-        class _SafeDict(dict):
+        class _SafeDict(dict[str, str]):
             def __missing__(self, key: str) -> str:
                 return f"<missing:{key}>"
 
@@ -460,27 +460,30 @@ def create_server() -> Server:
 
     server: Server = Server(SERVER_NAME, version=APP_VERSION)
 
-    @server.list_tools()
+    # mcp SDK's @server.* registration decorators carry no return annotation
+    # (the inner decorator(func) is unannotated upstream), so under strict mypy
+    # they read as untyped. Scope the suppression to those exact codes.
+    @server.list_tools()  # type: ignore[no-untyped-call, untyped-decorator]  # mcp SDK decorator is unannotated
     async def _on_list_tools() -> list[mcp_types.Tool]:
         return _tool_definitions(with_telegram=with_telegram)
 
-    @server.call_tool()
+    @server.call_tool()  # type: ignore[untyped-decorator]  # mcp SDK decorator is unannotated
     async def _on_call_tool(name: str, arguments: dict[str, Any] | None) -> list[mcp_types.TextContent]:
         return await _handle_call_tool(name, arguments, with_telegram=with_telegram)
 
-    @server.list_resources()
+    @server.list_resources()  # type: ignore[no-untyped-call, untyped-decorator]  # mcp SDK decorator is unannotated
     async def _on_list_resources() -> list[mcp_types.Resource]:
         return await _list_resources()
 
-    @server.read_resource()
+    @server.read_resource()  # type: ignore[no-untyped-call, untyped-decorator]  # mcp SDK decorator is unannotated
     async def _on_read_resource(uri: AnyUrl) -> str:
         return await _read_resource(uri)
 
-    @server.list_prompts()
+    @server.list_prompts()  # type: ignore[no-untyped-call, untyped-decorator]  # mcp SDK decorator is unannotated
     async def _on_list_prompts() -> list[mcp_types.Prompt]:
         return await _list_prompts()
 
-    @server.get_prompt()
+    @server.get_prompt()  # type: ignore[no-untyped-call, untyped-decorator]  # mcp SDK decorator is unannotated
     async def _on_get_prompt(
         name: str, arguments: dict[str, str] | None
     ) -> mcp_types.GetPromptResult:

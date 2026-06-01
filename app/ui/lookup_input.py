@@ -20,10 +20,11 @@ import difflib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from platformdirs import user_data_path
 from prompt_toolkit.completion import (
+    CompleteEvent,
     Completer,
     Completion,
     FuzzyCompleter,
@@ -31,6 +32,12 @@ from prompt_toolkit.completion import (
 )
 from prompt_toolkit.document import Document
 from prompt_toolkit.history import FileHistory
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
 from app.core.types import QueryKind
 
@@ -214,7 +221,9 @@ def build_history() -> FileHistory:
 class _SlashCompleter(Completer):
     """Emits `/help`, `/clear`, ... when the buffer starts with `/`."""
 
-    def get_completions(self, document: Document, complete_event):  # noqa: D401
+    def get_completions(
+        self, document: Document, complete_event: CompleteEvent
+    ) -> Iterator[Completion]:  # noqa: D401
         text = document.text_before_cursor
         if not text.startswith("/"):
             return
@@ -245,7 +254,9 @@ class _SlashCompleter(Completer):
 class _KindFlagCompleter(Completer):
     """Emits the 7 kinds after `--kind=` or `--kind ` (non-slash form)."""
 
-    def get_completions(self, document: Document, complete_event):
+    def get_completions(
+        self, document: Document, complete_event: CompleteEvent
+    ) -> Iterator[Completion]:
         text = document.text_before_cursor
         lower = text.lower()
         # Walk back to a "--kind=" or "--kind " token even if it's mid-line.
@@ -272,7 +283,9 @@ class _HistoryCompleter(Completer):
         self._history = history
         self._limit = limit
 
-    def get_completions(self, document: Document, complete_event):
+    def get_completions(
+        self, document: Document, complete_event: CompleteEvent
+    ) -> Iterator[Completion]:
         text = document.text_before_cursor
         if text.startswith("/") or len(text.strip()) < 2:
             return
@@ -329,7 +342,7 @@ def split_multi_target(value: str) -> list[str]:
 # Key bindings
 # --------------------------------------------------------------------------- #
 
-def build_key_bindings():
+def build_key_bindings() -> KeyBindings:
     """Return KeyBindings that bind Alt+Enter to insert ``\\n``.
 
     Plain Enter still submits — we deliberately keep ``multiline=False`` so the
@@ -342,7 +355,7 @@ def build_key_bindings():
     kb = KeyBindings()
 
     @kb.add("escape", "enter")  # Alt+Enter (a.k.a. Meta-Enter)
-    def _(event):  # noqa: ANN001
+    def _(event: KeyPressEvent) -> None:
         event.current_buffer.insert_text("\n")
 
     return kb

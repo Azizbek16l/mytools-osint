@@ -22,6 +22,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import questionary
 from prompt_toolkit.styles import Style as PStyle
@@ -327,7 +328,8 @@ def _do_signin() -> int:
                 console.print(f"[{tokens.OK}]already signed in as @{me.username or me.id}[/]")
                 return "ALREADY"
             sent = await c.send_code_request(settings().telegram_phone)
-            return sent.phone_code_hash
+            # telethon is unstubbed → phone_code_hash is Any; it is a str.
+            return cast("str | None", sent.phone_code_hash)
 
     try:
         hash_or_status = asyncio.run(phase1())

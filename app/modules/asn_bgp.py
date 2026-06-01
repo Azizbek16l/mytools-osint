@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 from collections.abc import AsyncIterator
+from typing import Any, cast
 
 from app.core.http import get_client
 from app.core.runner import Runner
@@ -26,7 +27,7 @@ def _is_private(ip: str) -> bool:
         return False
 
 
-async def _cymru(ip: str) -> dict | None:
+async def _cymru(ip: str) -> dict[str, Any] | None:
     """Plain TCP WHOIS to whois.cymru.com:43, verbose mode."""
     try:
         reader, writer = await asyncio.wait_for(
@@ -71,26 +72,26 @@ async def _cymru(ip: str) -> dict | None:
     return None
 
 
-async def _bgpview_ip(ip: str) -> dict | None:
+async def _bgpview_ip(ip: str) -> dict[str, Any] | None:
     client = await get_client()
     try:
         r = await client.get(f"https://api.bgpview.io/ip/{ip}",
                              headers={"Accept": "application/json"}, timeout=10)
         if r.status_code != 200:
             return None
-        return r.json().get("data")
+        return cast("dict[str, Any] | None", r.json().get("data"))
     except Exception:
         return None
 
 
-async def _bgpview_asn(asn: int) -> dict | None:
+async def _bgpview_asn(asn: int) -> dict[str, Any] | None:
     client = await get_client()
     try:
         r = await client.get(f"https://api.bgpview.io/asn/{asn}",
                              headers={"Accept": "application/json"}, timeout=10)
         if r.status_code != 200:
             return None
-        return r.json().get("data")
+        return cast("dict[str, Any] | None", r.json().get("data"))
     except Exception:
         return None
 

@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
+import httpx
 import tldextract
 
 from app.core.classify import classify_exception, classify_http
@@ -61,7 +62,7 @@ def _apex(value: str) -> str:
         # still have `registered_domain`. Try the new one first, fall back.
         rd = getattr(ext, "top_domain_under_public_suffix", None) or getattr(ext, "registered_domain", "")
         if rd:
-            return rd.lower()
+            return str(rd).lower()
     except Exception:
         pass
     return v
@@ -223,7 +224,7 @@ async def _github_gists(target: str) -> AsyncIterator[Hit]:
 
 # ---- ransomware.live -------------------------------------------------------
 
-async def _rl_get(client, url: str) -> Any:
+async def _rl_get(client: httpx.AsyncClient, url: str) -> Any:
     cached = _cache_get(url)
     if cached is not None:
         return cached
@@ -307,7 +308,7 @@ async def run(query: Query) -> AsyncIterator[Hit]:
     if not target:
         return
 
-    async def _collect(gen):
+    async def _collect(gen: AsyncIterator[Hit]) -> list[Hit]:
         return [h async for h in gen]
 
     tasks = [

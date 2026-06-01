@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import UTC, datetime
 
 from app.core.attack import tids_for
-from app.core.types import HitStatus, Query, QueryResult, Severity
+from app.core.types import Hit, HitStatus, Query, QueryResult, Severity
 
 _SEV_ORDER = {Severity.CRITICAL: 0, Severity.HIGH: 1, Severity.MEDIUM: 2,
               Severity.LOW: 3, Severity.INFO: 4}
@@ -20,7 +20,7 @@ _SEV_EMOJI = {
 
 
 def render_markdown(query: Query, result: QueryResult, elapsed_ms: int) -> str:
-    by_module: dict[str, list] = defaultdict(list)
+    by_module: dict[str, list[Hit]] = defaultdict(list)
     for h in result.hits:
         by_module[h.module].append(h)
 

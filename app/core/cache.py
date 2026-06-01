@@ -23,7 +23,9 @@ import asyncio
 import hashlib
 import json
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 from urllib.parse import urlparse
 
 import aiosqlite
@@ -84,7 +86,7 @@ def cache_path() -> str:
 
 
 @asynccontextmanager
-async def _conn():
+async def _conn() -> AsyncIterator[aiosqlite.Connection]:
     global _INIT_DONE
     db = await aiosqlite.connect(cache_path())
     try:
@@ -123,7 +125,7 @@ def _key(method: str, url: str, body: bytes = b"") -> str:
     return h.hexdigest()
 
 
-async def get(method: str, url: str, body: bytes = b"") -> dict | None:
+async def get(method: str, url: str, body: bytes = b"") -> dict[str, Any] | None:
     if not is_enabled():
         return None
     if method.upper() != "GET":
@@ -143,7 +145,7 @@ async def get(method: str, url: str, body: bytes = b"") -> dict | None:
     return {"status": row[0], "headers": json.loads(row[1]), "body": row[2]}
 
 
-async def put(method: str, url: str, status: int, headers: dict, body: bytes) -> None:
+async def put(method: str, url: str, status: int, headers: dict[str, str], body: bytes) -> None:
     if not is_enabled() or method.upper() != "GET":
         return
     k = _key(method, url)
@@ -159,7 +161,7 @@ async def put(method: str, url: str, status: int, headers: dict, body: bytes) ->
         await db.commit()
 
 
-async def stats() -> dict:
+async def stats() -> dict[str, Any]:
     async with _conn() as db:
         cur = await db.execute(
             "SELECT COUNT(*), SUM(LENGTH(body)), MAX(stored_at), MIN(stored_at) "
@@ -173,12 +175,19 @@ async def stats() -> dict:
         )
         expired_row = await cur2.fetchone()
         await cur2.close()
+    # COUNT(*)-style aggregates always yield exactly one row; the `or`
+    # fallbacks below are unreachable at runtime but keep the types sound.
+    entries = row[0] if row else 0
+    nbytes = row[1] if row else 0
+    newest = row[2] if row else None
+    oldest = row[3] if row else None
+    expired = expired_row[0] if expired_row else 0
     return {
-        "entries": row[0] or 0,
-        "bytes": row[1] or 0,
-        "newest": row[2],
-        "oldest": row[3],
-        "expired": expired_row[0] or 0,
+        "entries": entries or 0,
+        "bytes": nbytes or 0,
+        "newest": newest,
+        "oldest": oldest,
+        "expired": expired or 0,
         "path": cache_path(),
     }
 

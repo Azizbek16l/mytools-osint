@@ -21,6 +21,7 @@ import os
 import stat as _stat
 import struct
 from collections.abc import AsyncIterator
+from typing import Any
 from urllib.parse import quote
 
 from app.core.classify import classify_exception, classify_http
@@ -99,7 +100,7 @@ def _read_value(blob: bytes, ifd_off: int, entry_off: int,
     return tag, ftype, count, raw
 
 
-def _decode(ftype: int, raw: bytes, count: int, bo: str):
+def _decode(ftype: int, raw: bytes, count: int, bo: str) -> Any:
     # Never trust `count` to exceed what `raw` actually holds — cap it to the
     # available bytes per element so the struct format string and the result
     # list can't be inflated beyond the (already size-capped) payload.
@@ -196,7 +197,7 @@ def _find_tiff(payload: bytes) -> tuple[bytes, int, str] | None:
     return tiff, ifd0_off, bo
 
 
-def _rational_to_float(rat) -> float:
+def _rational_to_float(rat: Any) -> float:
     try:
         num, den = rat
         return float(num) / float(den) if den else 0.0
@@ -204,7 +205,7 @@ def _rational_to_float(rat) -> float:
         return 0.0
 
 
-def _dms_to_deg(dms) -> float:
+def _dms_to_deg(dms: Any) -> float:
     """[(deg_num,deg_den),(min_num,min_den),(sec_num,sec_den)] → decimal degrees."""
     if not dms or len(dms) < 3:
         return 0.0

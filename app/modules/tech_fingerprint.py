@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import AsyncIterator
+from typing import Any
 
 from app.core.http import get_client
 from app.core.runner import Runner
@@ -18,7 +19,7 @@ from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
 NAME = "tech_fingerprint"
 
 # Minimal signature set. Schema: {name, category, headers, cookies, html, scripts}
-SIGS: list[dict] = [
+SIGS: list[dict[str, Any]] = [
     {"name": "Cloudflare", "category": "cdn",
      "headers": {"server": r"cloudflare", "cf-ray": r".+"}},
     {"name": "Fastly", "category": "cdn",
@@ -87,7 +88,7 @@ SIGS: list[dict] = [
 ]
 
 
-def _match(sig: dict, headers: dict[str, str], cookies: list[str], body: str) -> bool:
+def _match(sig: dict[str, Any], headers: dict[str, str], cookies: list[str], body: str) -> bool:
     if "headers" in sig:
         for k, pat in sig["headers"].items():
             v = headers.get(k.lower(), "")
@@ -138,7 +139,7 @@ async def run(query: Query) -> AsyncIterator[Hit]:
         except Exception:
             pass
 
-    matched: list[dict] = []
+    matched: list[dict[str, Any]] = []
     for sig in SIGS:
         try:
             if _match(sig, headers, cookies, body):

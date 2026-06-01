@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from app.core.config import load_settings
 from app.core.profiles import PROFILES, apply_profile
 from app.core.runner import runner
-from app.core.types import Hit, Query, QueryKind
+from app.core.types import Hit, Query, QueryKind, QueryResult
 
 _BIND = "127.0.0.1"
 # Per-run secret embedded in the page and required on /api/scan. Stops other
@@ -41,7 +41,7 @@ _PROFILE_HIDDEN = frozenset({"default", "all"})
 # A client hitting /api/stop (or whose SSE writer breaks) cancels the Task so
 # the runner's TaskGroup tears the in-flight modules down server-side, rather
 # than letting the scan run to completion after the browser has navigated away.
-_SCANS: dict[str, asyncio.Task] = {}
+_SCANS: dict[str, asyncio.Task[QueryResult]] = {}
 
 
 def _kind_options() -> str:
@@ -445,7 +445,7 @@ async def _handle_scan(qs: dict[str, str], writer: asyncio.StreamWriter) -> None
     await writer.drain()
 
     scan_id = qs.get("id", "")
-    scan_task: asyncio.Task | None = None
+    scan_task: asyncio.Task[QueryResult] | None = None
 
     async def on_hit(h: Hit) -> None:
         # If the client has gone away the write/drain raises — cancel the

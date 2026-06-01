@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any, cast
 
 import dns.asyncresolver
 from email_validator import EmailNotValidError, validate_email
@@ -31,9 +32,10 @@ NAME = "email"
 _HOLEHE_PATH = Path(__file__).resolve().parents[2] / "data" / "holehe_sites.json"
 
 
-def _load_holehe() -> list[dict]:
+def _load_holehe() -> list[dict[str, Any]]:
     try:
-        return json.loads(_HOLEHE_PATH.read_text(encoding="utf-8")).get("sites", [])
+        sites = json.loads(_HOLEHE_PATH.read_text(encoding="utf-8")).get("sites", [])
+        return cast("list[dict[str, Any]]", sites)
     except Exception:
         return []
 

@@ -33,7 +33,10 @@ import importlib.metadata
 import logging
 import subprocess
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.core.runner import Runner
 
 log = logging.getLogger("mytools-osint.plugins")
 
@@ -64,7 +67,7 @@ def discover() -> list[tuple[str, Any, str]]:
     return out
 
 
-def register_with_runner(runner) -> int:
+def register_with_runner(runner: Runner) -> int:
     """Auto-discover + register each valid plugin module with the runner."""
     n = 0
     for name, mod, status in discover():

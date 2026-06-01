@@ -15,7 +15,10 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 from collections.abc import AsyncIterator
+from typing import Any, cast
 from urllib.parse import quote
+
+import httpx
 
 from app.core.http import get_client
 from app.core.runner import Runner
@@ -26,7 +29,7 @@ _BASE = "https://stat.ripe.net/data/{call}/data.json"
 _TIMEOUT = 10.0
 
 
-async def _call(client, call: str, resource: str) -> dict | None:
+async def _call(client: httpx.AsyncClient, call: str, resource: str) -> dict[str, Any] | None:
     url = _BASE.format(call=call) + f"?resource={quote(resource, safe='')}&sourceapp=mytools-osint"
     try:
         r = await client.get(url, timeout=_TIMEOUT,
@@ -36,7 +39,7 @@ async def _call(client, call: str, resource: str) -> dict | None:
     if r.status_code != 200:
         return None
     try:
-        return r.json()
+        return cast("dict[str, Any]", r.json())
     except Exception:
         return None
 
@@ -57,7 +60,8 @@ async def _enrich_ip(ip: str) -> AsyncIterator[Hit]:
     except ValueError:
         return  # not an IP — caller should already filter, defence-in-depth
     client = await get_client()
-    ni, ov, ab = await asyncio.gather(
+    _Res = dict[str, Any] | BaseException | None
+    results: tuple[_Res, _Res, _Res] = await asyncio.gather(
         _call(client, "network-info", ip),
         _call(client, "prefix-overview", ip),
         _call(client, "abuse-contact-finder", ip),
@@ -65,9 +69,9 @@ async def _enrich_ip(ip: str) -> AsyncIterator[Hit]:
     )
     # Coerce exceptions back to None — _call may transiently raise; we still
     # want partial-success rather than silent total failure.
-    ni = ni if isinstance(ni, dict) else None
-    ov = ov if isinstance(ov, dict) else None
-    ab = ab if isinstance(ab, dict) else None
+    ni: dict[str, Any] | None = results[0] if isinstance(results[0], dict) else None
+    ov: dict[str, Any] | None = results[1] if isinstance(results[1], dict) else None
+    ab: dict[str, Any] | None = results[2] if isinstance(results[2], dict) else None
     asn = None
     prefix = None
     if isinstance(ni, dict):

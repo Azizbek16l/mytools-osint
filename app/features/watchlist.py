@@ -16,6 +16,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from app.core.db import Database
 from app.core.runner import Runner
@@ -80,7 +81,7 @@ def _parse_dt(value: str | None) -> datetime | None:
     return dt
 
 
-def _row_to_entry(row: dict[str, object]) -> WatchlistEntry:
+def _row_to_entry(row: dict[str, Any]) -> WatchlistEntry:
     created = _parse_dt(row.get("created_at") if isinstance(row.get("created_at"), str) else None)
     if created is None:
         # Should never happen — created_at has NOT NULL. Fall back defensively.

@@ -136,7 +136,7 @@ async def run(query: Query) -> AsyncIterator[Hit]:
         async with sem:
             return await _probe(provider, url_tpl.format(name=name), name)
 
-    tasks: list = []
+    tasks: list[asyncio.Task[Hit | None]] = []
     for c in candidates:
         for provider, url_tpl, _ in CLOUDS:
             tasks.append(asyncio.create_task(gated(provider, url_tpl, c)))

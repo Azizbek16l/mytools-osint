@@ -24,6 +24,7 @@ import json
 import os
 import socket
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -53,7 +54,7 @@ def _hit_to_event(query: Query, hit: Hit) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- Splunk HEC
-async def _push_splunk(events: list[dict]) -> tuple[int, str]:
+async def _push_splunk(events: list[dict[str, Any]]) -> tuple[int, str]:
     """Push to Splunk HEC. Returns (count_sent, detail)."""
     url = os.getenv("SPLUNK_HEC_URL", "").rstrip("/")
     token = os.getenv("SPLUNK_HEC_TOKEN", "")
@@ -79,7 +80,7 @@ async def _push_splunk(events: list[dict]) -> tuple[int, str]:
 
 
 # ---------------------------------------------------------------- Elasticsearch
-async def _push_elastic(events: list[dict], index: str | None = None) -> tuple[int, str]:
+async def _push_elastic(events: list[dict[str, Any]], index: str | None = None) -> tuple[int, str]:
     """Bulk-index to Elasticsearch."""
     url = os.getenv("ELASTICSEARCH_URL", "").rstrip("/")
     api_key = os.getenv("ELASTICSEARCH_API_KEY", "")
@@ -110,7 +111,7 @@ async def _push_elastic(events: list[dict], index: str | None = None) -> tuple[i
 
 
 # ---------------------------------------------------------------- syslog (RFC 5424)
-def _push_syslog(events: list[dict], host: str | None = None,
+def _push_syslog(events: list[dict[str, Any]], host: str | None = None,
                  port: int | None = None, proto: str = "udp") -> tuple[int, str]:
     """RFC 5424 syslog over UDP or TCP. Synchronous (small enough)."""
     h = host or os.getenv("SYSLOG_HOST", "localhost")
@@ -148,11 +149,11 @@ def _push_syslog(events: list[dict], host: str | None = None,
 
 
 # ---------------------------------------------------------------- MISP Event
-async def _push_misp(events: list[dict], misp_url: str | None = None,
+async def _push_misp(events: list[dict[str, Any]], misp_url: str | None = None,
                      api_key: str | None = None,
                      info: str | None = None) -> tuple[int, str]:
     """Create a MISP Event with one Attribute per hit."""
-    url = (misp_url or os.getenv("MISP_URL", "")).rstrip("/")
+    url = (misp_url or os.getenv("MISP_URL", "") or "").rstrip("/")
     key = api_key or os.getenv("MISP_API_KEY", "")
     if not url or not key:
         return 0, "set MISP_URL + MISP_API_KEY"
@@ -161,10 +162,10 @@ async def _push_misp(events: list[dict], misp_url: str | None = None,
 
     # Pick attribute type per OSINT severity / category. MISP categories:
     #   Network activity, External analysis, Other
-    def attrib(ev: dict) -> dict | None:
+    def attrib(ev: dict[str, Any]) -> dict[str, Any] | None:
         ev.get("category", "")
         url_val = ev.get("url") or ""
-        val_map = [
+        val_map: list[tuple[str, Callable[[dict[str, Any]], Any]]] = [
             ("ip-src", lambda e: e.get("title") if (e.get("kind") == "ip") else None),
             ("domain", lambda e: e.get("title") if (e.get("kind") == "domain") else None),
             ("email-src", lambda e: e.get("title") if (e.get("kind") == "email") else None),
@@ -178,13 +179,14 @@ async def _push_misp(events: list[dict], misp_url: str | None = None,
                         "comment": ev.get("detail", "")[:200]}
         return None
 
+    attributes = [a for a in (attrib(ev) for ev in events) if a]
     body = {
         "Event": {
             "info": info or f"osint scan: {events[0].get('kind')}={events[0].get('target')}",
             "distribution": 0,   # your-org only
             "analysis": 2,       # complete
             "threat_level_id": 3,  # low
-            "Attribute": [a for a in (attrib(ev) for ev in events) if a],
+            "Attribute": attributes,
         }
     }
     endpoint = f"{url}/events"
@@ -198,7 +200,7 @@ async def _push_misp(events: list[dict], misp_url: str | None = None,
         if r.status_code in (200, 201):
             data = r.json()
             eid = (data.get("Event") or {}).get("id", "?")
-            return len(body["Event"]["Attribute"]), f"created event #{eid}"
+            return len(attributes), f"created event #{eid}"
         return 0, f"HTTP {r.status_code} — {r.text[:120]}"
     except Exception as e:
         return 0, f"{type(e).__name__}: {e}"
@@ -253,6 +255,9 @@ def cmd_export(argv: list[str]) -> int:
                 "SELECT * FROM queries WHERE id = ?", (qid,),
             ) as cur:
                 qrow = await cur.fetchone()
+            if qrow is None:
+                print(f"  no stored query #{qid}", file=sys.stderr)
+                return 1
             async with db._conn.execute(
                 "SELECT * FROM hits WHERE query_id = ?", (qid,),
             ) as cur:

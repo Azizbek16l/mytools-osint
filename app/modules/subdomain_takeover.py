@@ -144,20 +144,29 @@ async def _run(query: Query) -> AsyncIterator[Hit]:
     # We probe BOTH the apex (cheap) and any known subdomain entities (if graph
     # already has them — caller can re-run after subdomain enum modules).
     candidates: list[str] = [host]
-    # Pull SUBDOMAIN entities from the graph if available, bounded.
+    # Pull SUBDOMAIN entities from the graph if available, bounded. A short-lived
+    # read connection to the WAL-mode DB is safe alongside any scan-owned writer.
     try:
-        from app.core.db import get_db
-        db = await get_db()
-        # If the entity store has subdomains for this domain, take up to 30.
-        # We use a simple LIKE query to avoid pulling the full entity table.
-        async with db._conn.execute(  # type: ignore[attr-defined]
-            "SELECT value FROM entities WHERE type='subdomain' AND value LIKE ? LIMIT 30",
-            (f"%.{host}",),
-        ) as cur:
-            rows = await cur.fetchall()
-        candidates.extend(r[0] for r in rows if r and r[0])
-    except Exception:
-        pass
+        from app.core.config import settings
+        from app.core.db import Database
+        db = Database(settings().db_path)
+        await db.connect()
+        try:
+            # If the entity store has subdomains for this domain, take up to 30.
+            # A simple LIKE avoids pulling the full entity table.
+            assert db._conn is not None
+            async with db._conn.execute(
+                "SELECT value FROM entities WHERE type='subdomain' AND value LIKE ? LIMIT 30",
+                (f"%.{host}",),
+            ) as cur:
+                rows = await cur.fetchall()
+            candidates.extend(r[0] for r in rows if r and r[0])
+        finally:
+            await db.close()
+    except Exception as e:
+        # Graph enrichment is best-effort: no DB yet / no subdomains / locked →
+        # fall back to probing just the apex. Observable at debug.
+        log.debug("subdomain-takeover graph enrichment skipped: %s", e)
 
     # Dedup + cap.
     seen = []

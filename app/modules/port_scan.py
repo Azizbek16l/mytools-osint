@@ -109,7 +109,7 @@ async def run(query: Query) -> AsyncIterator[Hit]:
 
     sem = asyncio.Semaphore(CONCURRENCY)
 
-    async def gated(ip, port):
+    async def gated(ip: str, port: int) -> tuple[str, int, bool, bytes]:
         async with sem:
             return ip, *(await _scan_port(ip, port))
 

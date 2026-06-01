@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -185,7 +186,7 @@ def _norm_default(v: str) -> str:
     return v.strip().lower()
 
 
-_NORMALISERS: dict[EntityType, Any] = {
+_NORMALISERS: dict[EntityType, Callable[[str], str]] = {
     EntityType.EMAIL:     _norm_email,
     EntityType.DOMAIN:    _norm_domain,
     EntityType.SUBDOMAIN: _norm_domain,

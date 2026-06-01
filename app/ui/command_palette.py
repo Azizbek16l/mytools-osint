@@ -13,6 +13,10 @@ straight to whatever they need without remembering menu paths.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.core.db import Database
 from dataclasses import dataclass, field
 
 from app.core.profiles import PROFILES
@@ -29,7 +33,7 @@ class PaletteAction:
     keywords: list[str] = field(default_factory=list)
 
 
-def build_palette(db_factory) -> list[PaletteAction]:
+def build_palette(db_factory: Callable[[], Awaitable[Database]]) -> list[PaletteAction]:
     """Build the standard palette. db_factory is a callable that returns a Database."""
     from app.ui import interactive as ix
 
@@ -70,7 +74,7 @@ def build_palette(db_factory) -> list[PaletteAction]:
         if prof_name in ("default", "all"):
             continue
 
-        async def _apply_profile(p=prof_name) -> int:
+        async def _apply_profile(p: str = prof_name) -> int:
             from app.core.profiles import apply_profile
             r = runner()
             apply_profile(r, p)
@@ -88,7 +92,7 @@ def build_palette(db_factory) -> list[PaletteAction]:
     # Per-module toggle entries (so user can hit `/email_security` and toggle)
     r = runner()
     for m in r.all_modules():
-        async def _toggle(name=m.name) -> int:
+        async def _toggle(name: str = m.name) -> int:
             r2 = runner()
             for mod in r2.all_modules():
                 if mod.name == name:

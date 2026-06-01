@@ -152,7 +152,7 @@ async def run(query: Query) -> AsyncIterator[Hit]:
 
     sem = asyncio.Semaphore(CONCURRENCY)
 
-    async def gated(host: str):
+    async def gated(host: str) -> tuple[str, list[str]]:
         async with sem:
             return await _resolve(host)
 

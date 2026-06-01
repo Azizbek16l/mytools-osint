@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from typing import Any
 
 from app.core.classify import classify_exception
 from app.core.http import get_client
@@ -96,7 +97,7 @@ async def _probe(domain: str, path: str, label: str, hint: str) -> Hit | None:
     # Pretty-print JSON preview if applicable
     preview = body.replace("\n", " ").strip()[:140]
     sev = Severity.INFO
-    extra: dict = {"bytes": len(r.text or ""), "preview": preview}
+    extra: dict[str, Any] = {"bytes": len(r.text or ""), "preview": preview}
     if label.startswith("security.txt") or label == "ai.txt" or label == "llms.txt":
         sev = Severity.LOW
     if label == "saml-metadata" or label == "idp-metadata":
@@ -123,7 +124,7 @@ async def run(query: Query) -> AsyncIterator[Hit]:
         return
     sem = asyncio.Semaphore(8)
 
-    async def gated(path, label, hint):
+    async def gated(path: str, label: str, hint: str) -> Hit | None:
         async with sem:
             return await _probe(domain, path, label, hint)
 

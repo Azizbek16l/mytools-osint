@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from app.core.http import get_client
 from app.core.runner import Runner
@@ -256,7 +256,7 @@ async def _smaps_run(query: Query) -> AsyncIterator[Hit]:
 
     sem = asyncio.Semaphore(6)
 
-    async def gated(p):
+    async def gated(p: str) -> Hit | None:
         async with sem:
             return await probe(p)
 
@@ -277,7 +277,7 @@ async def _smaps_run(query: Query) -> AsyncIterator[Hit]:
 # ============================================================================
 # Registrars — each module name acts as its own NAME
 # ============================================================================
-def _make_module(name: str, run_fn):
+def _make_module(name: str, run_fn: Callable[[Query], AsyncIterator[Hit]]) -> object:
     class _M:
         NAME = name
         run = staticmethod(run_fn)
@@ -300,7 +300,7 @@ NAME = "waf_cms_graphql"
 
 def run(query: Query) -> AsyncIterator[Hit]:
     """Composite entry — runs all 4 fingerprint modules concurrently."""
-    async def _go():
+    async def _go() -> AsyncIterator[Hit]:
         async for h in _waf_run(query):
             yield h
         async for h in _cms_run(query):

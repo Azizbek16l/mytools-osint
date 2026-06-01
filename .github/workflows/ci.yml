@@ -29,8 +29,7 @@ jobs:
           pip install pytest pytest-asyncio pytest-cov ruff mypy
       - name: Lint (ruff — hard gate, must pass)
         run: ruff check .
-      - name: Type check (mypy — advisory until type debt is paid down)
-        continue-on-error: true
+      - name: Type check (mypy — hard gate, strict, must pass)
         run: mypy app
       - name: Tests + coverage
         run: pytest -q --cov=app --cov-report=term-missing

@@ -7,6 +7,8 @@ this module owns the Qt stylesheet for the desktop UI.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from app.ui import tokens
 
 __all__ = (
@@ -211,5 +213,5 @@ QLabel[role="badge-dim"]  {{ color: {TEXT_DIM}; }}
 """
 
 
-def apply(app) -> None:
+def apply(app: Any) -> None:  # app: PySide6 QApplication (unstubbed → Any)
     app.setStyleSheet(STYLE)

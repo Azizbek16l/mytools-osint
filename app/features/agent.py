@@ -741,7 +741,7 @@ async def _run_agent(target: str, *, no_approve: bool) -> int:
     if no_approve or not sys.stdout.isatty():
         approve = None
     else:
-        approve = _interactive_approve  # type: ignore[assignment]
+        approve = _interactive_approve
 
     try:
         result = await loop.run(

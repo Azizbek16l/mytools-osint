@@ -14,6 +14,7 @@ Both degrade silently on outage (UNAVAILABLE / RATELIMITED) — never crash.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 from app.core.classify import classify_exception, classify_http
 from app.core.http import get_client
@@ -107,7 +108,7 @@ async def _hibp_breach_catalog(email: str) -> AsyncIterator[Hit]:
         )
 
 
-def _emailrep_severity(data: dict) -> Severity:
+def _emailrep_severity(data: dict[str, Any]) -> Severity:
     if data.get("suspicious"):
         return Severity.HIGH
     if (data.get("details") or {}).get("blacklisted"):

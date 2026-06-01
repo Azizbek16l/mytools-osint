@@ -198,9 +198,9 @@ def cmd_self_update(check_only: bool = False) -> int:
             return 1
 
 
-def _ver_tuple(v: str) -> tuple:
+def _ver_tuple(v: str) -> tuple[tuple[int, int | str], ...]:
     """Parse 'X.Y.Z' to a tuple; non-numeric components compare last."""
-    parts = []
+    parts: list[tuple[int, int | str]] = []
     for p in v.split("."):
         try:
             parts.append((0, int(p)))

@@ -152,7 +152,7 @@ class UnsafeExpression(ValueError):
     """Raised when an expression contains a disallowed node or name."""
 
 
-_ALLOWED_BINOPS = {
+_ALLOWED_BINOPS: dict[type[ast.cmpop], Callable[[Any, Any], bool]] = {
     ast.Eq: _op.eq, ast.NotEq: _op.ne,
     ast.Lt: _op.lt, ast.LtE: _op.le,
     ast.Gt: _op.gt, ast.GtE: _op.ge,

@@ -13,6 +13,7 @@ import asyncio
 import ssl
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from typing import Any
 
 from app.core.runner import Runner
 from app.core.types import Hit, HitStatus, Query, QueryKind, Severity
@@ -37,7 +38,7 @@ def _normalize_host(value: str) -> tuple[str, int]:
     return v, 443
 
 
-async def _grab_cert(host: str, port: int, timeout: float = 20.0) -> dict | None:
+async def _grab_cert(host: str, port: int, timeout: float = 20.0) -> dict[str, Any] | None:
     """Return parsed cert + connection info, or None on failure."""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False

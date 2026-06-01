@@ -17,6 +17,7 @@ import ipaddress
 import os
 import time
 from collections.abc import AsyncIterator
+from typing import Any
 
 from app.core.classify import classify_exception, classify_http
 from app.core.http import get_client
@@ -30,7 +31,7 @@ _SPAMHAUS_DROP = "https://www.spamhaus.org/drop/drop.txt"
 _ABUSEIPDB = "https://api.abuseipdb.com/api/v2/check"
 
 # Spamhaus DROP cache — refreshed every hour. The list is small (~kilobytes).
-_DROP_CACHE: dict[str, object] = {"expires": 0.0, "networks": []}
+_DROP_CACHE: dict[str, Any] = {"expires": 0.0, "networks": []}
 _DROP_LOCK = asyncio.Lock()
 _DROP_TTL_S = 3600
 
@@ -43,7 +44,7 @@ def _is_ip(value: str) -> bool:
         return False
 
 
-async def _load_spamhaus_drop() -> tuple[list[ipaddress.IPv4Network], str]:
+async def _load_spamhaus_drop() -> tuple[list[ipaddress.IPv4Network | ipaddress.IPv6Network], str]:
     """Fetch & parse the Spamhaus DROP list. Cached for 1h.
 
     Returns (networks, detail). On outage, returns ([], reason) but the
@@ -52,7 +53,7 @@ async def _load_spamhaus_drop() -> tuple[list[ipaddress.IPv4Network], str]:
     async with _DROP_LOCK:
         now = time.monotonic()
         if now < _DROP_CACHE["expires"] and _DROP_CACHE["networks"]:
-            return _DROP_CACHE["networks"], "cached"  # type: ignore[return-value]
+            return _DROP_CACHE["networks"], "cached"
         client = await get_client()
         try:
             r = await client.get(
@@ -61,10 +62,10 @@ async def _load_spamhaus_drop() -> tuple[list[ipaddress.IPv4Network], str]:
                 timeout=10,
             )
         except BaseException as e:
-            return _DROP_CACHE["networks"], f"{type(e).__name__}: {e}"[:120]  # type: ignore[return-value]
+            return _DROP_CACHE["networks"], f"{type(e).__name__}: {e}"[:120]
         if r.status_code != 200:
-            return _DROP_CACHE["networks"], f"HTTP {r.status_code}"  # type: ignore[return-value]
-        networks: list[ipaddress.IPv4Network] = []
+            return _DROP_CACHE["networks"], f"HTTP {r.status_code}"
+        networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
         for line in (r.text or "").splitlines():
             line = line.strip()
             if not line or line.startswith(";"):
@@ -122,7 +123,7 @@ async def _spamhaus(ip: str) -> AsyncIterator[Hit]:
     )
 
 
-def _greynoise_severity(data: dict) -> Severity:
+def _greynoise_severity(data: dict[str, Any]) -> Severity:
     classification = (data.get("classification") or "").lower()
     if classification == "malicious":
         return Severity.HIGH

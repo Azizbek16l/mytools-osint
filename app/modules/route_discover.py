@@ -38,6 +38,7 @@ import random
 import re
 import string
 from collections.abc import AsyncIterator
+from typing import Any
 
 from app.core.http import _opsec_on, get_client
 from app.core.runner import Runner
@@ -190,7 +191,7 @@ async def _fetch_robots(domain: str) -> set[str]:
     return discovered
 
 
-async def _one_probe(domain: str, path: str) -> dict | None:
+async def _one_probe(domain: str, path: str) -> dict[str, Any] | None:
     """Single GET with body+title+headers capture."""
     url = f"https://{domain}/{path}"
     try:
@@ -210,7 +211,7 @@ async def _one_probe(domain: str, path: str) -> dict | None:
         return None
 
 
-async def _baseline(domain: str) -> dict | None:
+async def _baseline(domain: str) -> dict[str, Any] | None:
     """Probe THREE random non-existent paths; take median length to avoid
     collision with a real route, CDN-cached error variation, or one-off blip.
 
@@ -242,7 +243,7 @@ async def _baseline(domain: str) -> dict | None:
     }
 
 
-def _is_soft_404(baseline: dict | None, status: int, body_length: int,
+def _is_soft_404(baseline: dict[str, Any] | None, status: int, body_length: int,
                   title: str) -> bool:
     """True iff this looks like the baseline 404-equivalent."""
     if baseline is None:
@@ -310,8 +311,8 @@ def _passes_content_sniff(path: str, body: bytes) -> tuple[bool, str]:
 
 
 async def _probe_one(domain: str, path: str, category: str, severity: Severity,
-                      baseline: dict | None,
-                      rate_state: dict) -> Hit | None:
+                      baseline: dict[str, Any] | None,
+                      rate_state: dict[str, Any]) -> Hit | None:
     """One GET against /<path>. Returns None for soft-404 / errors / 4xx.
 
     Per @senior-security-engineer review:
@@ -452,13 +453,13 @@ async def run(query: Query) -> AsyncIterator[Hit]:
                   extra={"robots_paths": sorted(robots_paths)[:20]})
 
     # Adaptive rate-state shared across probes
-    rate_state: dict = {"rate_limited": 0}
+    rate_state: dict[str, Any] = {"rate_limited": 0}
 
     # Run the scan
     sem = asyncio.Semaphore(_CONCURRENCY)
     n_found_by_cat: dict[str, int] = {}
 
-    async def gated(p, c, s):
+    async def gated(p: str, c: str, s: Severity) -> Hit | None:
         async with sem:
             return await _probe_one(domain, p, c, s, baseline, rate_state)
 

@@ -20,6 +20,7 @@ import sys
 import xml.sax.saxutils as xml_esc
 from collections import deque
 from pathlib import Path
+from typing import Any
 
 from app.core.config import load_settings, settings
 from app.core.db import Database
@@ -30,7 +31,7 @@ from app.core.entities import EntityType, entity_id
 async def bfs_subgraph(
     db: Database, root_type: EntityType, root_value: str,
     *, max_depth: int = 2, max_total: int = 500,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return (entities, edges) of the connected component around root,
     bounded by depth and total node count. Backend reviewer's chunked-IN
     pattern."""
@@ -38,8 +39,8 @@ async def bfs_subgraph(
     root_row = await db.entity_get(root_type.value, root_value)
     if not root_row:
         return [], []
-    seen: dict[str, dict] = {root_id: root_row}
-    edges: list[dict] = []
+    seen: dict[str, dict[str, Any]] = {root_id: root_row}
+    edges: list[dict[str, Any]] = []
     frontier: deque[tuple[str, int]] = deque([(root_id, 0)])
     while frontier and len(seen) < max_total:
         # Drain one whole depth level at a time so we hit the chunk-batch
@@ -79,9 +80,9 @@ async def bfs_subgraph(
 
 # ---------------- export formats ---------------------------------------
 
-def to_cytoscape_json(entities: list[dict], edges: list[dict]) -> str:
+def to_cytoscape_json(entities: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
     """Cytoscape.js JSON format (elements: [{data:{...}, group:'nodes'|'edges'}])."""
-    elements = []
+    elements: list[dict[str, Any]] = []
     for e in entities:
         elements.append({
             "group": "nodes",
@@ -103,9 +104,9 @@ def to_cytoscape_json(entities: list[dict], edges: list[dict]) -> str:
     return json.dumps({"elements": elements}, indent=2)
 
 
-def to_gexf(entities: list[dict], edges: list[dict]) -> str:
+def to_gexf(entities: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
     """GEXF 1.3 — opens directly in Gephi. Hand-rolled, no NetworkX dep."""
-    def esc(s):
+    def esc(s: object) -> str:
         return xml_esc.escape(str(s))
     out = ['<?xml version="1.0" encoding="UTF-8"?>',
            '<gexf xmlns="http://gexf.net/1.3" version="1.3">',
@@ -137,9 +138,9 @@ def to_gexf(entities: list[dict], edges: list[dict]) -> str:
     return "\n".join(out)
 
 
-def to_graphml(entities: list[dict], edges: list[dict]) -> str:
+def to_graphml(entities: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
     """GraphML — Maltego / yEd-compatible."""
-    def esc(s):
+    def esc(s: object) -> str:
         return xml_esc.escape(str(s))
     out = ['<?xml version="1.0" encoding="UTF-8"?>',
            '<graphml xmlns="http://graphml.graphdrawing.org/xmlns">',
@@ -162,12 +163,12 @@ def to_graphml(entities: list[dict], edges: list[dict]) -> str:
 
 # ---------------- ASCII pretty-print ----------------------------------
 
-def render_ascii(entities: list[dict], edges: list[dict], root_id: str) -> str:
+def render_ascii(entities: list[dict[str, Any]], edges: list[dict[str, Any]], root_id: str) -> str:
     """Compact analyst-friendly view rooted at root_id."""
-    by_src: dict[str, list[dict]] = {}
+    by_src: dict[str, list[dict[str, Any]]] = {}
     for e in edges:
         by_src.setdefault(e["src"], []).append(e)
-    by_id: dict[str, dict] = {e["id"]: e for e in entities}
+    by_id: dict[str, dict[str, Any]] = {e["id"]: e for e in entities}
     lines: list[str] = []
     visited: set[str] = set()
 

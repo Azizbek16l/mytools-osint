@@ -33,6 +33,7 @@ import sys
 import xml.sax.saxutils as xml_esc
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_\-]{1,63}$")
 
@@ -423,7 +424,7 @@ def _detect_platform() -> str:
     return "cron"
 
 
-def install_schedule(s: Schedule, *, dry_run: bool = False) -> dict[str, object]:
+def install_schedule(s: Schedule, *, dry_run: bool = False) -> dict[str, Any]:
     """Render the right unit for the current OS and (unless dry_run) load it.
 
     Returns a dict describing what happened (always — even on dry_run).
@@ -434,7 +435,7 @@ def install_schedule(s: Schedule, *, dry_run: bool = False) -> dict[str, object]
       * ``executed``: True if we actually attempted to bootstrap/enable
     """
     plat = _detect_platform()
-    info: dict[str, object] = {"platform": plat, "unit_paths": [], "executed": False}
+    info: dict[str, Any] = {"platform": plat, "unit_paths": [], "executed": False}
     if plat == "macos":
         path = _launchd_plist_path(s)
         text = render_launchd_plist(s)
@@ -558,7 +559,7 @@ def list_installed() -> list[dict[str, object]]:
     return found
 
 
-def remove_schedule(name: str) -> dict[str, object]:
+def remove_schedule(name: str) -> dict[str, Any]:
     """Remove a schedule by name. Returns a summary dict; never raises."""
     # macOS
     la = Path.home() / "Library" / "LaunchAgents" / f"uz.bluetm.osint.{name}.plist"

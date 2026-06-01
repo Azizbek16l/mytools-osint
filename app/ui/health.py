@@ -30,7 +30,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from platformdirs import user_data_path
 from rich.text import Text
@@ -62,11 +62,11 @@ def health_file_path() -> Path:
 # Load / save
 # --------------------------------------------------------------------------- #
 
-def _empty_store() -> dict:
+def _empty_store() -> dict[str, Any]:
     return {"version": _SCHEMA_VERSION, "modules": {}}
 
 
-def _load() -> dict:
+def _load() -> dict[str, Any]:
     path = health_file_path()
     if not path.exists():
         return _empty_store()
@@ -84,7 +84,7 @@ def _load() -> dict:
     return data
 
 
-def _save(data: dict) -> None:
+def _save(data: dict[str, Any]) -> None:
     path = health_file_path()
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")

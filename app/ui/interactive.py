@@ -19,14 +19,16 @@ import json
 import re
 import webbrowser
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path as _Path
+from typing import TYPE_CHECKING, Any, cast
 
 import questionary
 from prompt_toolkit.styles import Style as PStyle
 from questionary import Choice
-from rich.console import Console, Group
+from rich.console import Console, Group, RenderableType
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
@@ -35,11 +37,14 @@ from rich.text import Text
 
 from app.core.config import settings
 from app.core.db import Database
-from app.core.runner import runner
+from app.core.runner import Runner, runner
 from app.core.types import Hit, HitStatus, Query, QueryKind
 from app.ui import tokens
 from app.ui.banner import BRAND
 from app.ui.health import record_module_run
+
+if TYPE_CHECKING:
+    from app.ui.lookup_input import SlashName
 
 console = Console(highlight=False, force_terminal=tokens.colour_enabled() or None)
 
@@ -177,7 +182,7 @@ async def show_help(screen: str = "main") -> None:
 # Chat-shell /help groups — canonical slash names by theme. Built from
 # lookup_input.SLASH_ALIASES + SLASH_DESCRIPTIONS so the help can never drift
 # from the dispatcher / completer.
-_CHAT_HELP_GROUPS: list[tuple[str, tuple[str, ...]]] = [
+_CHAT_HELP_GROUPS: list[tuple[str, tuple[SlashName, ...]]] = [
     ("lookup",        ("kind", "history", "export")),
     ("shell",         ("help", "clear", "version", "quit")),
     ("config",        ("settings", "profile", "theme", "modules", "sites")),
@@ -208,7 +213,7 @@ async def _show_chat_help() -> None:
     for group, names in _CHAT_HELP_GROUPS:
         rows.append(f"   {group}\n", style=f"bold {tokens.FG}")
         for name in names:
-            aliases = SLASH_ALIASES.get(name)  # type: ignore[arg-type]
+            aliases = SLASH_ALIASES.get(name)
             if not aliases:
                 continue
             seen.add(name)
@@ -216,7 +221,7 @@ async def _show_chat_help() -> None:
             extra = (
                 "  (" + ", ".join(aliases[1:]) + ")" if len(aliases) > 1 else ""
             )
-            desc = SLASH_DESCRIPTIONS.get(name, "")  # type: ignore[arg-type]
+            desc = SLASH_DESCRIPTIONS.get(name, "")
             rows.append(f"     {primary:<11}", style=f"bold {tokens.ACCENT}")
             rows.append(f" {desc}", style=tokens.FG)
             rows.append(f"{extra}\n", style=tokens.DIM)
@@ -226,9 +231,9 @@ async def _show_chat_help() -> None:
     if leftover:
         rows.append("   more\n", style=f"bold {tokens.FG}")
         for name in leftover:
-            primary = SLASH_ALIASES[name][0]  # type: ignore[index]
+            primary = SLASH_ALIASES[name][0]
             rows.append(f"     {primary:<11}", style=f"bold {tokens.ACCENT}")
-            rows.append(f" {SLASH_DESCRIPTIONS.get(name, '')}\n",  # type: ignore[arg-type]
+            rows.append(f" {SLASH_DESCRIPTIONS.get(name, '')}\n",
                         style=tokens.FG)
         rows.append("\n")
     rows.append("   " + ("─" * 64) + "\n", style=tokens.DIM)
@@ -855,7 +860,7 @@ def _render_summary_card(query: Query, hits: list[Hit], elapsed_ms: int) -> Grou
             url_text,
         )
 
-    parts = [
+    parts: list[RenderableType] = [
         Text(""),
         header,
         rule,
@@ -1360,7 +1365,7 @@ def _copy_to_clipboard(text: str) -> tuple[bool, str]:
     soft dependency — never added to ``requirements.txt``.
     """
     try:
-        import pyperclip  # type: ignore[import-not-found]
+        import pyperclip
     except ImportError:
         return False, "pyperclip not installed"
     try:
@@ -1844,7 +1849,7 @@ async def action_modules() -> None:
             )
 
 
-async def _render_modules_table(r) -> None:
+async def _render_modules_table(r: Runner) -> None:
     """Render the k9s-style table (no questionary)."""
 
     # Header line
@@ -1966,7 +1971,12 @@ async def _slash_graph(arg: str) -> None:
     from app.features.graph import cmd_graph
     parts = (arg or "stats").strip().split() or ["stats"]
     try:
-        await cmd_graph(parts)
+        # cmd_graph is a SYNC handler that runs its OWN event loop internally
+        # (asyncio.run). `await`-ing its int result raised TypeError and broke
+        # /graph entirely; calling it directly here would also fail ("event loop
+        # already running"). Off-load to a worker thread — same pattern as
+        # _slash_cli_verb uses for the other sync CLI handlers.
+        await asyncio.to_thread(cmd_graph, parts)
     except SystemExit:
         pass  # cmd_graph may sys.exit on error — keep the prompt alive
     except Exception as e:
@@ -2170,7 +2180,7 @@ async def _slash_cli_verb(verb: str, arg: str) -> None:
                 argv = [a for a in argv if a not in ("--apply", "--confirm")]
 
     # Lazy import the handler so a missing optional dep degrades to a message.
-    def _resolve():
+    def _resolve() -> Callable[..., Any] | None:
         if verb == "case":
             from cli import _handle_case_subcommand as h
             return h
@@ -2225,10 +2235,14 @@ async def _slash_export(db: Database, arg: str) -> None:
     if q is None or hits is None:
         console.print(f"   [{tokens.WARN}]no scan to export yet — run one first[/]")
         return
+    # _CHAT_STATE is an untyped state bag; last_query/last_hits are set together
+    # after a scan, so they are a Query and a list[Hit] here.
+    q = cast("Query", q)
+    hits = cast("list[Hit]", hits)
     try:
         path = export_hits(
             q, list(hits), fmt,
-            elapsed_ms=int(_CHAT_STATE.get("last_elapsed_ms", 0) or 0),
+            elapsed_ms=int(cast("int", _CHAT_STATE.get("last_elapsed_ms", 0)) or 0),
             path=out,
         )
     except ValueError:
@@ -2452,7 +2466,7 @@ async def run_interactive(show_figlet: bool = False, classic: bool = False) -> i
                         console.print(f"[{tokens.BAD}]settings wizard error:[/] {e}")
                 elif choice == "palette":
                     from app.ui.command_palette import build_palette, open_palette
-                    async def _db_factory():
+                    async def _db_factory() -> Database:
                         return db
                     try:
                         await open_palette(build_palette(_db_factory))

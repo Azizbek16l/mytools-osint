@@ -244,7 +244,7 @@ async def _js_scan(domain: str) -> AsyncIterator[Hit]:
 
 def _scan_text(text: str, where: str) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     for name, pattern in SECRET_PATTERNS.items():
         for m in re.finditer(pattern, text):
             try:

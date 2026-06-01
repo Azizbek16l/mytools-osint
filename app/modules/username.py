@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 from app.core.config import settings
 from app.core.runner import Runner
@@ -13,7 +14,7 @@ from .base import clean_username, stream_probes
 
 NAME = "username"
 _SITES_PATH = Path(__file__).resolve().parents[2] / "data" / "sites.json"
-_cached_sites: list[dict] | None = None
+_cached_sites: list[dict[str, Any]] | None = None
 
 # Tail-latency control for the ~1000-site fan-out.
 #
@@ -49,7 +50,7 @@ _USERNAME_HARD_TIMEOUT = 20.0   # absolute wall-clock ceiling per probe
 _USERNAME_CONCURRENCY = 100
 
 
-def load_sites() -> list[dict]:
+def load_sites() -> list[dict[str, Any]]:
     global _cached_sites
     if _cached_sites is None:
         try:

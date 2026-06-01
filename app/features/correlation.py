@@ -214,8 +214,8 @@ def _make_hit(rule: Rule, title: str, evidence: Any, match_kind: str) -> Hit:
 
 def _format_title(template: str, **kw: Any) -> str:
     """str.format wrapper that survives missing keys."""
-    class _D(dict):
-        def __missing__(self, k):  # type: ignore[override]
+    class _D(dict[str, Any]):
+        def __missing__(self, k: str) -> str:
             return "{" + k + "}"
 
     try:

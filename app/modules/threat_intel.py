@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 
 from app.core.classify import classify_exception, classify_http
 from app.core.http import get_client
@@ -205,7 +205,7 @@ async def run(query: Query) -> AsyncIterator[Hit]:
 
     sem = asyncio.Semaphore(3)
 
-    async def gated(coro):
+    async def gated(coro: Awaitable[Hit]) -> Hit:
         async with sem:
             return await coro
 

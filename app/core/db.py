@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 
 from .types import Hit, Query, QueryResult
+
+if TYPE_CHECKING:
+    from app.core.entities import Edge, Entity
 
 _PRAGMAS = """
 PRAGMA journal_mode=WAL;
@@ -484,10 +487,9 @@ class Database:
 
     # ------------------------------------------------------------------ v4.0 entity graph
 
-    async def entity_upsert(self, entity) -> None:
+    async def entity_upsert(self, entity: Entity) -> None:
         """Insert or merge an Entity. Idempotent — same id updates last_seen."""
         assert self._conn is not None
-        from app.core.entities import Entity  # noqa
         ent: Entity = entity
         now = ent.last_seen.isoformat()
         await self._exec(
@@ -506,10 +508,9 @@ class Database:
         )
         await self._conn.commit()
 
-    async def edge_upsert(self, edge) -> None:
+    async def edge_upsert(self, edge: Edge) -> None:
         """Insert an Edge (uniq on (src,dst,rel,hit_id))."""
         assert self._conn is not None
-        from app.core.entities import Edge  # noqa
         e: Edge = edge
         now = e.last_seen.isoformat()
         await self._exec(
@@ -526,7 +527,7 @@ class Database:
         )
         await self._conn.commit()
 
-    async def entity_get(self, type_: str, value: str):
+    async def entity_get(self, type_: str, value: str) -> dict[str, Any] | None:
         """Look up one entity by (type, canonical-value). Returns dict or None."""
         assert self._conn is not None
         from app.core.entities import EntityType, canonical_key
@@ -538,7 +539,7 @@ class Database:
             row = await cur.fetchone()
         return dict(row) if row else None
 
-    async def edges_from(self, entity_id: str) -> list[dict]:
+    async def edges_from(self, entity_id: str) -> list[dict[str, Any]]:
         """All edges leaving this entity (id, dst_id, rel, source, confidence)."""
         assert self._conn is not None
         async with self._conn.execute(
@@ -548,7 +549,7 @@ class Database:
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
-    async def edges_to(self, entity_id: str) -> list[dict]:
+    async def edges_to(self, entity_id: str) -> list[dict[str, Any]]:
         """All edges arriving at this entity."""
         assert self._conn is not None
         async with self._conn.execute(
@@ -558,13 +559,13 @@ class Database:
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
-    async def neighbours_batch(self, entity_ids: list[str]) -> list[dict]:
+    async def neighbours_batch(self, entity_ids: list[str]) -> list[dict[str, Any]]:
         """Edges + dst-entity rows for a batch (used by BFS — backend reviewer's
         recommendation: chunk to 500 to avoid SQLite param limit)."""
         assert self._conn is not None
         if not entity_ids:
             return []
-        out: list[dict] = []
+        out: list[dict[str, Any]] = []
         for i in range(0, len(entity_ids), 500):
             chunk = entity_ids[i:i + 500]
             # `placeholders` is only "?,?,?…" (one bound marker per id); the

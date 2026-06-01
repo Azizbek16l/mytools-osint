@@ -69,7 +69,8 @@ def _ram_total_bytes() -> int | None:
     """Best-effort total RAM in bytes — works without psutil on every OS we ship."""
     # Prefer psutil if the user already has it. Don't make it a runtime dep.
     try:
-        import psutil  # type: ignore[import-not-found]
+        import psutil
+
         return int(psutil.virtual_memory().total)
     except ImportError:
         pass
@@ -120,12 +121,12 @@ def _ram_total_bytes() -> int | None:
 def _human_bytes(n: int | None) -> str:
     if n is None:
         return "?"
-    n = float(n)
+    size = float(n)
     for unit in ("B", "KB", "MB", "GB", "TB"):
-        if abs(n) < 1024.0:
-            return f"{n:.1f}{unit}"
-        n /= 1024.0
-    return f"{n:.1f}PB"
+        if abs(size) < 1024.0:
+            return f"{size:.1f}{unit}"
+        size /= 1024.0
+    return f"{size:.1f}PB"
 
 
 def _is_apple_silicon() -> bool:

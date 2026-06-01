@@ -28,7 +28,7 @@ import os
 import socket
 import sys
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from app.core.config import load_settings, settings
 from app.core.db import Database
@@ -382,7 +382,8 @@ async def nl_to_args(text: str) -> dict[str, Any]:
     try:
         start = raw.index("{")
         end = raw.rindex("}") + 1
-        return json.loads(raw[start:end])
+        # The slice is bracketed by {...}, so this is a JSON object in practice.
+        return cast("dict[str, Any]", json.loads(raw[start:end]))
     except (ValueError, json.JSONDecodeError):
         return {"error": f"could not parse AI response: {raw[:200]}"}
 

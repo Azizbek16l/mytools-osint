@@ -216,7 +216,7 @@ async def run(query: Query) -> AsyncIterator[Hit]:
     if not domain:
         return
 
-    async def collect(gen):
+    async def collect(gen: AsyncIterator[Hit]) -> list[Hit]:
         return [h async for h in gen]
 
     tasks = [

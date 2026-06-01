@@ -47,13 +47,13 @@ from app.core.types import Hit, HitStatus, Query, QueryKind, QueryResult
 
 # ----- main window -------------------------------------------------------------
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow):  # type: ignore[misc]  # PySide6 unstubbed → base is Any
     streamed = Signal(object)  # Hit
 
     def __init__(self, db: Database) -> None:
         super().__init__()
         self.db = db
-        self._current_task: asyncio.Task | None = None
+        self._current_task: asyncio.Task[None] | None = None
         self._current_query: Query | None = None
         self._current_hits: list[Hit] = []
 
@@ -267,7 +267,8 @@ class MainWindow(QMainWindow):
             return
 
         self._reset_table()
-        self._current_query = Query(kind=kind, value=value)
+        query = Query(kind=kind, value=value)
+        self._current_query = query
         self._current_hits = []
         self.run_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
@@ -281,7 +282,7 @@ class MainWindow(QMainWindow):
 
         async def runit() -> None:
             try:
-                result = await runner().run(self._current_query, on_hit=on_hit)
+                result = await runner().run(query, on_hit=on_hit)
                 self._current_hits = list(result.hits)
                 qid = await self.db.save_result(result)
                 self._finish(result, qid)

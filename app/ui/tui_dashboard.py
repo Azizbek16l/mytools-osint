@@ -65,7 +65,7 @@ def run_tui(query: Query, html_out: str | None = None) -> int:
 
     load_settings()
 
-    class _SearchScreen(ModalScreen):
+    class _SearchScreen(ModalScreen):  # type: ignore[misc]  # textual unstubbed → base is Any
         """Modal input for inline TUI search — pops up on `/` keypress."""
         CSS = """
         _SearchScreen { align: center middle; background: rgba(0,0,0,0.6); }
@@ -98,7 +98,7 @@ def run_tui(query: Query, html_out: str | None = None) -> int:
             self.app.pop_screen()
 
 
-    class Dashboard(App):
+    class Dashboard(App):  # type: ignore[misc]  # textual unstubbed → base is Any
         CSS = """
         Screen { background: #0a1219; }
         Header { background: #0e1822; color: #83c5ff; }
@@ -130,7 +130,7 @@ def run_tui(query: Query, html_out: str | None = None) -> int:
             self.query = q
             self.hits: list[Hit] = []
             self.started_at = datetime.now(UTC)
-            self.runner_task: asyncio.Task | None = None
+            self.runner_task: asyncio.Task[None] | None = None
             self.module_counts: dict[str, int] = {}
             self.module_positives: dict[str, int] = {}
             self.result: QueryResult | None = None

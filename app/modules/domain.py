@@ -344,11 +344,13 @@ async def run(query: Query) -> AsyncIterator[Hit]:
                       status=HitStatus.ERROR, detail=str(e))
             continue
         # HackerTarget returns dict[host->ip], others return set
+        subs: set[str]
+        ip_map: dict[str, str]
         if isinstance(result[0], dict):
             subs = set(result[0].keys())
             ip_map = result[0]
         else:
-            subs = result[0]
+            subs = set(result[0])
             ip_map = {}
         summary = result[1]
         for s in subs:

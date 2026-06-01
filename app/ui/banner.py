@@ -8,7 +8,18 @@ Two flavours:
 """
 from __future__ import annotations
 
+from typing import Protocol
+
 from app import __version__
+
+
+class _StyleLike(Protocol):
+    """Minimal surface of ``cli.Style`` used by the banner (avoids a cli import cycle)."""
+
+    def accent(self, t: str) -> str: ...
+    def bold(self, t: str) -> str: ...
+    def dim(self, t: str) -> str: ...
+
 
 BRAND = "Bluetm.uz"
 TAGLINE = "personal OSINT — authorised use only"
@@ -34,7 +45,7 @@ def stats_line() -> str:
     return f"{sites:,} sites · {mods} modules · free APIs"
 
 
-def render(style=None) -> str:
+def render(style: _StyleLike | None = None) -> str:
     """Plain (uncoloured) banner. style is an optional cli.Style instance."""
     art = ASCII_ART
     sub = f"   mytools-osint v{__version__} — by {BRAND}"
@@ -51,7 +62,7 @@ def render(style=None) -> str:
     )
 
 
-def render_compact(style=None) -> str:
+def render_compact(style: _StyleLike | None = None) -> str:
     """Single-line brandmark for repeated screens.
 
     Format:  bluetm·uz  osint · v0.1.0 · 1,008 sites · 9 modules

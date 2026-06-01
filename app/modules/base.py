@@ -77,7 +77,7 @@ async def probe_site(
     # runs (data-quality bug in the site list, not a reason to fail the probe).
     if valid_chars:
         try:
-            ok = re.match(valid_chars, target)
+            ok = bool(re.match(valid_chars, target))
         except re.error as e:
             # Broken pattern in the site list (data-quality bug): don't gate on
             # it and don't burn the probe as a bogus ERROR — but log it so a bad

@@ -26,6 +26,7 @@ Schema lives in db.py migration v4.
 """
 from __future__ import annotations
 
+import builtins
 import logging
 import re
 from dataclasses import dataclass, field
@@ -145,7 +146,9 @@ class Case:
     async def set_status(self, db: Database, status: str) -> None:
         await _set_status_impl(db, self, status)
 
-    async def timeline(self, db: Database) -> list[dict[str, Any]]:
+    # NB: ``list`` is shadowed by the ``Case.list`` static method above, so the
+    # builtin must be qualified here for the type checker.
+    async def timeline(self, db: Database) -> builtins.list[dict[str, Any]]:
         return await _timeline_impl(db, self)
 
     async def attach_run(
@@ -452,7 +455,8 @@ async def _resume_impl(db: Database, case: Case) -> ResumeContext:
         """SELECT COUNT(*) AS n FROM case_entities WHERE case_id = ?""",
         (case.id,),
     ) as cur:
-        n = (await cur.fetchone())["n"]
+        count_row = await cur.fetchone()
+        n = count_row["n"] if count_row else 0
 
     # Cheap snapshot of entities from the latest run (cap 50 — analyst preview).
     last_ents: list[dict[str, Any]] = []

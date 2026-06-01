@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 from collections.abc import AsyncIterator
+from typing import Any
 
 import dns.asyncresolver
 
@@ -42,7 +43,7 @@ async def _resolve_ips(host: str) -> list[str]:
     return sorted(out)[:_MAX_IPS_PER_DOMAIN]
 
 
-def _severity_for(vulns: list, tags: list) -> Severity:
+def _severity_for(vulns: list[Any], tags: list[Any]) -> Severity:
     if not vulns:
         return Severity.LOW
     tags_l = [str(t).lower() for t in tags]

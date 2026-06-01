@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import Any
 
 import dns.asyncresolver
 import httpx
@@ -33,7 +34,7 @@ _DNS_TIMEOUT = 4.0
 
 # Subjack-style fingerprints. Keep narrow — false positives are worse than
 # missed detections; an SSRF/admin-panel scan is the user's next step.
-FINGERPRINTS: list[dict] = [
+FINGERPRINTS: list[dict[str, Any]] = [
     {"service": "AWS S3", "cname": [".s3.amazonaws.com", ".s3-website"],
      "body": ["NoSuchBucket", "The specified bucket does not exist"]},
     {"service": "GitHub Pages", "cname": [".github.io"],
@@ -114,7 +115,7 @@ async def _cname_chain(host: str) -> list[str]:
     return chain
 
 
-def _match_service(chain: list[str]) -> dict | None:
+def _match_service(chain: list[str]) -> dict[str, Any] | None:
     for hop in chain:
         for fp in FINGERPRINTS:
             for marker in fp["cname"]:

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from prompt_toolkit import Application
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.layout import HSplit, Layout, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.styles import Style
@@ -52,7 +53,7 @@ def _style() -> Style:
     })
 
 
-def _render(cursor: int):
+def _render(cursor: int) -> list[tuple[str, str]]:
     """Build the styled fragment list for the current frame."""
     lines: list[tuple[str, str]] = []
     # Header
@@ -76,9 +77,9 @@ def _render(cursor: int):
 
 async def pick_action() -> str:
     """Show the menu and return one of the action ids in _ENTRIES, or 'exit'."""
-    state = {"cursor": 0}
+    state: dict[str, int] = {"cursor": 0}
 
-    def get_text():
+    def get_text() -> list[tuple[str, str]]:
         return _render(state["cursor"])
 
     kb = KeyBindings()
@@ -86,31 +87,31 @@ async def pick_action() -> str:
     # Single-fire shortcuts — the headline UX win.
     for key, action, _label, _desc in _ENTRIES:
         @kb.add(key, eager=True)
-        def _(event, _act=action):
+        def _(event: KeyPressEvent, _act: str = action) -> None:
             event.app.exit(result=_act)
 
     # Standard navigation.
     @kb.add("up")
     @kb.add("c-p")
-    def _up(event):
+    def _up(event: KeyPressEvent) -> None:
         state["cursor"] = (state["cursor"] - 1) % len(_ENTRIES)
         event.app.invalidate()
 
     @kb.add("down")
     @kb.add("c-n")
     @kb.add("tab")
-    def _down(event):
+    def _down(event: KeyPressEvent) -> None:
         state["cursor"] = (state["cursor"] + 1) % len(_ENTRIES)
         event.app.invalidate()
 
     @kb.add("enter")
-    def _enter(event):
+    def _enter(event: KeyPressEvent) -> None:
         event.app.exit(result=_ENTRIES[state["cursor"]][1])
 
     @kb.add("escape")
     @kb.add("c-c")
     @kb.add("c-d")
-    def _quit(event):
+    def _quit(event: KeyPressEvent) -> None:
         event.app.exit(result="exit")
 
     # Layout — single window, ~12 lines high (header + 9 rows + footer).
@@ -120,7 +121,7 @@ async def pick_action() -> str:
         wrap_lines=False,
     )
 
-    app = Application(
+    app: Application[str] = Application(
         layout=Layout(HSplit([body])),
         key_bindings=kb,
         style=_style(),
