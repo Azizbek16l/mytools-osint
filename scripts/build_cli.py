@@ -41,6 +41,14 @@ def main() -> int:
         "--nofollow-import-to=qasync",
         "--nofollow-import-to=shiboken6",
         "--nofollow-import-to=textual",  # TUI is optional, keep CLI binary slim
+        # CRITICAL for startup speed: by default a --onefile binary extracts its
+        # whole payload to a fresh temp dir on EVERY launch and deletes it on
+        # exit — for this ~38 MB bundle that was ~10 s per run, even for
+        # `osint --version`. Pin the extraction to a stable, version-keyed cache
+        # dir so it unpacks ONCE per version and every later run reuses it
+        # (warm start drops from ~10 s to ~0.3 s). The {VERSION} segment means a
+        # new release re-extracts once (no stale code), and old caches are inert.
+        "--onefile-tempdir-spec={CACHE_DIR}/mytools-osint/{VERSION}",
         "--windows-console-mode=force",
         "--company-name=MarsIT",
         "--product-name=osint",

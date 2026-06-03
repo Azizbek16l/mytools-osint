@@ -1,3 +1,3 @@
 """mytools-osint — personal OSINT desktop tool."""
 
-__version__ = "4.3.3"
+__version__ = "4.3.4"
